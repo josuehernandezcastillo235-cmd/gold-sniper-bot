@@ -1,7 +1,6 @@
 from telegram import Bot
 import asyncio
 import os
-from strategy import analizar
 
 TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
@@ -9,22 +8,15 @@ CHAT_ID = os.getenv("CHAT_ID")
 async def main():
     bot = Bot(token=TOKEN)
 
-    # Mensaje de inicio
-    await bot.send_message(
-        chat_id=CHAT_ID,
-        text="🚀 Gold Sniper Bot iniciado correctamente en Railway."
-    )
+    try:
+        await bot.send_message(
+            chat_id=CHAT_ID,
+            text="🚀 Prueba: Gold Sniper Bot conectado en Railway."
+        )
+        print("✅ Mensaje enviado a Telegram")
 
-    while True:
-        señal = analizar()
-
-        if "COMPRA" in señal or "VENTA" in señal:
-            await bot.send_message(
-                chat_id=CHAT_ID,
-                text=f"🥇 Gold Sniper Alert\n\n{señal}"
-            )
-
-        await asyncio.sleep(300)
+    except Exception as e:
+        print("❌ Error Telegram:", e)
 
 if __name__ == "__main__":
     asyncio.run(main())
