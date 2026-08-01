@@ -12,12 +12,13 @@ async def main():
     while True:
         señal = analizar()
 
-        await bot.send_message(
-            chat_id=CHAT_ID,
-            text=f"🥇 Gold Sniper Bot\n\n{señal}"
-        )
+        if "COMPRA" in señal or "VENTA" in señal:
+            await bot.send_message(
+                chat_id=CHAT_ID,
+                text=f"🥇 Gold Sniper Alert\n\n{señal}"
+            )
 
-        await asyncio.sleep(300)  # espera 5 minutos
+        await asyncio.sleep(300)
 
 if __name__ == "__main__":
     asyncio.run(main())
