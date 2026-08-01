@@ -18,11 +18,26 @@ def analizar():
 
     ultimo = df.iloc[-1]
 
+    precio = round(float(ultimo["Close"]), 2)
+    rsi = round(float(ultimo["RSI"]), 2)
+
     if ultimo["EMA20"] > ultimo["EMA50"] and ultimo["RSI"] > 55:
-        return "🟢 Posible COMPRA detectada"
+        return f"""🟢 COMPRA detectada
+
+🥇 GOLD
+💵 Precio: {precio}
+📊 RSI: {rsi}
+📈 Tendencia: Alcista
+⏱ Marco: 5 minutos"""
 
     elif ultimo["EMA20"] < ultimo["EMA50"] and ultimo["RSI"] < 45:
-        return "🔴 Posible VENTA detectada"
+        return f"""🔴 VENTA detectada
+
+🥇 GOLD
+💵 Precio: {precio}
+📊 RSI: {rsi}
+📉 Tendencia: Bajista
+⏱ Marco: 5 minutos"""
 
     else:
         return "😴 Sin señal"
