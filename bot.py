@@ -16,7 +16,7 @@ async def main():
 
 ✅ Conexión Telegram: OK
 ✅ Motor de análisis: OK
-📊 Mercado: GOLD (GC=F)
+📊 Mercado: XAU/USD
 ⏱ Revisión: cada 5 minutos"""
     )
 
