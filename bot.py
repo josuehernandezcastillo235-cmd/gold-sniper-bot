@@ -11,37 +11,45 @@ async def main():
 
     bot = Bot(token=TOKEN)
 
-    # Mensaje al iniciar
     await bot.send_message(
         chat_id=CHAT_ID,
-        text="""🚀 XAU Sniper AI iniciado correctamente en Railway.
+        text="""🚀 XAU Sniper AI V2.0 iniciado correctamente.
 
 ✅ Conexión Telegram: OK
-✅ Motor de análisis: OK
+✅ Estrategia V2.0 cargada
 📊 Mercado: XAU/USD
 ⏱ Revisión: cada 5 minutos"""
     )
 
     contador = 0
+    ultima_senal = ""
 
     while True:
 
-        señal = analizar()
+        senal = analizar()
 
-        # Envía alerta solo si hay compra o venta
-        if "COMPRA" in señal or "VENTA" in señal:
+        # Solo enviar si es una señal NUEVA
+        if (
+            ("COMPRA" in senal or "VENTA" in senal)
+            and senal != ultima_senal
+        ):
 
             await bot.send_message(
                 chat_id=CHAT_ID,
                 text=f"""🥇 XAU Sniper Alert
 
-{señal}"""
+{senal}"""
             )
 
+            ultima_senal = senal
 
-        # Mensaje de estado cada hora
+        # Si ya no hay señal, reinicia para permitir una futura alerta
+        elif "😴 Sin señal" in senal:
+            ultima_senal = ""
+
         contador += 1
 
+        # Mensaje de estado cada hora
         if contador >= 12:
 
             await bot.send_message(
@@ -49,11 +57,10 @@ async def main():
                 text="""🤖 XAU Sniper AI sigue activo.
 
 😴 Sin señales por el momento.
-⏰ El sistema continúa monitoreando XAU/USD."""
+⏰ Monitoreando XAU/USD."""
             )
 
             contador = 0
-
 
         await asyncio.sleep(300)
 
