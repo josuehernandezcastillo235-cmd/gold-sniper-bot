@@ -2,7 +2,7 @@ import requests
 import pandas as pd
 import os
 
-from ta.trend import EMAIndicator
+from ta.trend import EMAIndicator, ADXIndicator
 from ta.momentum import RSIIndicator
 from ta.volatility import AverageTrueRange
 
@@ -15,7 +15,7 @@ def analizar():
         "https://api.twelvedata.com/time_series"
         "?symbol=XAU/USD"
         "&interval=5min"
-        "&outputsize=200"
+        "&outputsize=250"
         f"&apikey={API_KEY}"
     )
 
@@ -25,55 +25,65 @@ def analizar():
         return f"❌ Error datos: {data.get('message', 'desconocido')}"
 
     df = pd.DataFrame(data["values"])
-
-    df = df.iloc[::-1]
+    df = df.iloc[::-1].reset_index(drop=True)
 
     for col in ["open", "high", "low", "close"]:
         df[col] = df[col].astype(float)
 
-    # Indicadores
-    df["EMA20"] = EMAIndicator(
-        df["close"], window=20
-    ).ema_indicator()
+    # =========================
+    # INDICADORES
+    # =========================
 
-    df["EMA50"] = EMAIndicator(
-        df["close"], window=50
-    ).ema_indicator()
+    df["EMA20"] = EMAIndicator(df["close"], window=20).ema_indicator()
+    df["EMA50"] = EMAIndicator(df["close"], window=50).ema_indicator()
+    df["EMA200"] = EMAIndicator(df["close"], window=200).ema_indicator()
 
-    df["EMA200"] = EMAIndicator(
-        df["close"], window=200
-    ).ema_indicator()
-
-    df["RSI"] = RSIIndicator(
-        df["close"], window=14
-    ).rsi()
+    df["RSI"] = RSIIndicator(df["close"], window=14).rsi()
 
     atr = AverageTrueRange(
         high=df["high"],
         low=df["low"],
         close=df["close"],
-        window=14
+        window=14,
     )
 
     df["ATR"] = atr.average_true_range()
 
+    adx = ADXIndicator(
+        high=df["high"],
+        low=df["low"],
+        close=df["close"],
+        window=14,
+    )
+
+    df["ADX"] = adx.adx()
+
     ultimo = df.iloc[-1]
 
     precio = float(ultimo["close"])
+    ema20 = float(ultimo["EMA20"])
+    ema50 = float(ultimo["EMA50"])
+    ema200 = float(ultimo["EMA200"])
+
     rsi = float(ultimo["RSI"])
     atr_valor = float(ultimo["ATR"])
+    adx_valor = float(ultimo["ADX"])
 
+    # =========================
     # COMPRA
+    # =========================
+
     if (
-        ultimo["EMA20"] > ultimo["EMA50"]
-        and ultimo["EMA50"] > ultimo["EMA200"]
-        and rsi > 55
+        ema20 > ema50 > ema200
+        and rsi > 60
+        and adx_valor > 25
+        and precio <= ema20 + (atr_valor * 0.5)
     ):
 
-        sl = precio - atr_valor
-        tp = precio + (atr_valor * 2)
+        sl = precio - (atr_valor * 1.2)
+        tp = precio + (atr_valor * 2.5)
 
-        return f"""🥇 GOLD SNIPER ALERT
+        return f"""🥇 GOLD SNIPER BOT V2.0
 
 🟢 COMPRA XAU/USD
 
@@ -92,43 +102,7 @@ def analizar():
 📈 RSI:
 {rsi:.1f}
 
-📊 Tendencia:
-Alcista fuerte
-"""
+🔥 ADX:
+{adx_valor:.1f}
 
-
-    # VENTA
-    elif (
-        ultimo["EMA20"] < ultimo["EMA50"]
-        and ultimo["EMA50"] < ultimo["EMA200"]
-        and rsi < 45
-    ):
-
-        sl = precio + atr_valor
-        tp = precio - (atr_valor * 2)
-
-        return f"""🥇 GOLD SNIPER ALERT
-
-🔴 VENTA XAU/USD
-
-💵 Precio:
-{precio:.2f}
-
-🎯 Entrada:
-{precio:.2f}
-
-🛑 Stop Loss:
-{sl:.2f}
-
-💰 Take Profit:
-{tp:.2f}
-
-📉 RSI:
-{rsi:.1f}
-
-📊 Tendencia:
-Bajista fuerte
-"""
-
-
-    return "😴 Sin señal"
+📊 Tend
