@@ -1,7 +1,7 @@
 import requests
 import pandas as pd
 import os
-import time
+import uuid
 
 from ta.trend import EMAIndicator, ADXIndicator
 from ta.momentum import RSIIndicator
@@ -14,9 +14,11 @@ SYMBOL = "XAU/USD"
 
 
 def obtener_datos(intervalo):
+
     url = (
         "https://api.twelvedata.com/time_series"
-        f"?symbol={SYMBOL}&interval={intervalo}"
+        f"?symbol={SYMBOL}"
+        f"&interval={intervalo}"
         "&outputsize=250"
         f"&apikey={API_KEY}"
     )
@@ -25,18 +27,19 @@ def obtener_datos(intervalo):
     data = respuesta.json()
 
     if "values" not in data:
-        raise Exception(data.get("message", "Error obteniendo datos"))
+        raise Exception(
+            data.get("message", "Error obteniendo datos")
+        )
 
     df = pd.DataFrame(data["values"])
 
     df = df.iloc[::-1].reset_index(drop=True)
 
-    columnas = ["open", "high", "low", "close"]
-
-    for c in columnas:
+    for c in ["open", "high", "low", "close"]:
         df[c] = df[c].astype(float)
 
     return df
+
 
 
 def calcular_indicadores(df):
@@ -46,10 +49,12 @@ def calcular_indicadores(df):
         window=20
     ).ema_indicator()
 
+
     df["EMA50"] = EMAIndicator(
         df["close"],
         window=50
     ).ema_indicator()
+
 
     df["EMA200"] = EMAIndicator(
         df["close"],
@@ -83,7 +88,7 @@ def calcular_indicadores(df):
 
 
 
-def analizar_tendencia(df):
+def tendencia(df):
 
     vela = df.iloc[-1]
 
@@ -107,8 +112,8 @@ def analizar_tendencia(df):
 
 
 
-def calcular_confianza(
-    tendencia,
+def confianza(
+    tendencia5,
     tendencia15,
     rsi,
     adx,
@@ -118,7 +123,7 @@ def calcular_confianza(
     puntos = 50
 
 
-    if tendencia == tendencia15:
+    if tendencia5 == tendencia15:
         puntos += 15
 
 
@@ -134,11 +139,7 @@ def calcular_confianza(
         puntos += 10
 
 
-    if puntos > 95:
-        puntos = 95
-
-
-    return puntos
+    return min(puntos, 95)
 
 
 
@@ -148,7 +149,6 @@ def analizar():
 
         df5 = obtener_datos("5min")
         df15 = obtener_datos("15min")
-
 
         df5 = calcular_indicadores(df5)
         df15 = calcular_indicadores(df15)
@@ -160,50 +160,41 @@ def analizar():
 
 
 
-    actual = df5.iloc[-1]
-    actual15 = df15.iloc[-1]
+    vela = df5.iloc[-1]
 
 
-    precio = float(actual.close)
-
-    ema20 = float(actual.EMA20)
-    ema50 = float(actual.EMA50)
-    ema200 = float(actual.EMA200)
-
-    rsi = float(actual.RSI)
-    atr = float(actual.ATR)
-    adx = float(actual.ADX)
+    precio = float(vela.close)
+    atr = float(vela.ATR)
+    rsi = float(vela.RSI)
+    adx = float(vela.ADX)
 
 
-    tendencia5 = analizar_tendencia(df5)
-    tendencia15 = analizar_tendencia(df15)
+    tendencia5 = tendencia(df5)
+    tendencia15 = tendencia(df15)
+
+
+    cerca = abs(
+        precio - float(vela.EMA20)
+    ) <= atr * 0.6
 
 
 
-    cerca_ema = (
-        abs(precio - ema20)
-        <= atr * 0.6
-    )
-
-
-    confianza = calcular_confianza(
+    score = confianza(
         tendencia5,
         tendencia15,
         rsi,
         adx,
-        cerca_ema
+        cerca
     )
 
 
-
-    # COMPRA
 
     if (
         tendencia5 == "ALCISTA"
         and tendencia15 == "ALCISTA"
         and rsi > 55
         and adx > 22
-        and cerca_ema
+        and cerca
     ):
 
         sl = precio - (atr * 1.5)
@@ -211,11 +202,13 @@ def analizar():
 
 
         return f"""
-🥇 XAU SNIPER AI V4.0
+🥇 XAU SNIPER AI V3.0
+
+ID: {uuid.uuid4().hex[:6]}
 
 🟢 COMPRA
 
-⭐ Confianza: {confianza}%
+⭐ Confianza: {score}%
 
 📊 Tendencia:
 5M: {tendencia5}
@@ -233,35 +226,32 @@ Entrada: {precio:.2f}
 
 
 RSI: {rsi:.1f}
-
 ADX: {adx:.1f}
-
 ATR: {atr:.2f}
 """
 
 
-
-    # VENTA
 
     if (
         tendencia5 == "BAJISTA"
         and tendencia15 == "BAJISTA"
         and rsi < 45
         and adx > 22
-        and cerca_ema
+        and cerca
     ):
-
 
         sl = precio + (atr * 1.5)
         tp = precio - (atr * 3)
 
 
         return f"""
-🥇 XAU SNIPER AI V4.0
+🥇 XAU SNIPER AI V3.0
+
+ID: {uuid.uuid4().hex[:6]}
 
 🔴 VENTA
 
-⭐ Confianza: {confianza}%
+⭐ Confianza: {score}%
 
 📊 Tendencia:
 5M: {tendencia5}
@@ -279,9 +269,7 @@ Entrada: {precio:.2f}
 
 
 RSI: {rsi:.1f}
-
 ADX: {adx:.1f}
-
 ATR: {atr:.2f}
 """
 
