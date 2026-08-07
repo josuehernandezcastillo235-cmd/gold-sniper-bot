@@ -107,57 +107,41 @@ await query.message.reply_text(
     f"✅ Señal marcada como: {historial[-1]['estado']}"
             )
 
-async def control_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    global analisis_activo
+async def botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     query = update.callback_query
 
     await query.answer()
 
-    if query.data == "encender":
+    historial = cargar_historial()
 
-        analisis_activo = True
-
-        teclado = [
-            [
-                InlineKeyboardButton(
-                    "⏸️ APAGAR ANÁLISIS",
-                    callback_data="apagar"
-                )
-            ]
-        ]
-
-        await query.edit_message_text(
-            "🥇 XAU SNIPER AI V3.0\n\n"
-            "🟢 ANÁLISIS ACTIVADO\n"
-            "📊 Mercado: XAU/USD\n"
-            "⏱️ Revisión: cada 100 segundos\n"
-            "💰 Consultas a Twelve Data: ACTIVAS",
-            reply_markup=InlineKeyboardMarkup(teclado)
+    if not historial:
+        await query.answer(
+            "Todavía no hay ninguna señal para marcar.",
+            show_alert=True
         )
+        return
 
-    elif query.data == "apagar":
+    if query.data == "tomar":
 
-        analisis_activo = False
+        historial[-1]["estado"] = "TOMADA"
 
-        teclado = [
-            [
-                InlineKeyboardButton(
-                    "▶️ ENCENDER ANÁLISIS",
-                    callback_data="encender"
-                )
-            ]
-        ]
+    elif query.data == "ignorar":
 
-        await query.edit_message_text(
-            "🥇 XAU SNIPER AI V3.0\n\n"
-            "🔴 ANÁLISIS PAUSADO\n"
-            "📊 Mercado: XAU/USD\n"
-            "💰 Consultas a Twelve Data: DETENIDAS\n\n"
-            "Pulsa el botón para volver a analizar.",
-            reply_markup=InlineKeyboardMarkup(teclado)
-        )
+        historial[-1]["estado"] = "IGNORADA"
+
+    else:
+        return
+
+    guardar_historial(historial)
+
+    await query.edit_message_reply_markup(
+        reply_markup=None
+    )
+
+    await query.message.reply_text(
+        f"✅ Señal marcada como: {historial[-1]['estado']}"
+    )
 
 
 async def analizar_loop(app):
