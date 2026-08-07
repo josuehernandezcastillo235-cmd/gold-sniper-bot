@@ -184,7 +184,7 @@ async def analizar_loop(app):
 
 
         except Exception as e:
-    print(f"❌ Error: {e}")
+            print(f"❌ Error: {e}")
 
 
 async def inicio(app):
