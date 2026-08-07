@@ -92,15 +92,20 @@ async def botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 
-    await query.edit_message_reply_markup(
-        reply_markup=None
+    if not historial:
+    await query.answer(
+        "Todavía no hay ninguna señal para marcar.",
+        show_alert=True
     )
+    return
 
+await query.edit_message_reply_markup(
+    reply_markup=None
+)
 
-
-    await query.message.reply_text(
-        f"✅ Señal marcada como: {historial[-1]['estado']}"
-    )
+await query.message.reply_text(
+    f"✅ Señal marcada como: {historial[-1]['estado']}"
+            )
 
 async def control_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
@@ -273,7 +278,10 @@ async def main():
     app = Application.builder().token(TOKEN).build()
 
     app.add_handler(
-        CallbackQueryHandler(botones)
+    CallbackQueryHandler(
+        botones,
+        pattern="^(tomar|ignorar)$"
+    )
     )
 
     app.add_handler(
