@@ -217,17 +217,7 @@ async def main():
     app = Application.builder().token(TOKEN).build()
 
     app.add_handler(
-    CallbackQueryHandler(
-        botones,
-        pattern="^(tomar|ignorar)$"
-    )
-    )
-
-    app.add_handler(
-        CallbackQueryHandler(
-            control_bot,
-            pattern="^(encender|apagar)$"
-        )
+        CallbackQueryHandler(botones)
     )
 
     await app.initialize()
@@ -246,7 +236,6 @@ async def main():
 
     while True:
         await asyncio.sleep(3600)
-
 
 if __name__ == "__main__":
     asyncio.run(main())
