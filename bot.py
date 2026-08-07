@@ -132,7 +132,6 @@ async def botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.message.reply_text(
         f"✅ Señal marcada como: {historial[-1]['estado']}"
     )
-    )
 
 async def analizar_loop(app):
 
