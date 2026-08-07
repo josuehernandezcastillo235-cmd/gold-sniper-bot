@@ -72,22 +72,30 @@ async def botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
 
     await query.answer()
+if query.data == "encender":
 
-    historial = cargar_historial()
+    analisis_activo = True
+
+    await query.edit_message_text(
+        "🟢 Análisis ENCENDIDO\n\n"
+        "💰 Twelve Data activo\n"
+        "📊 Buscando señales XAU/USD"
+    )
+
+    return
 
 
-    if query.data == "encender":
+if query.data == "apagar":
 
-        analisis_activo = True
+    analisis_activo = False
 
-        await query.edit_message_text(
-            "🟢 Análisis ENCENDIDO\n\n"
-            "💰 Twelve Data activo\n"
-            "📊 Buscando señales XAU/USD"
-        )
+    await query.edit_message_text(
+        "🔴 Análisis APAGADO\n\n"
+        "💰 Twelve Data detenido\n"
+        "📊 No se están buscando señales"
+    )
 
-        return
-
+    return
 
     if not historial:
 
@@ -212,12 +220,17 @@ async def analizar_loop(app):
 async def inicio(app):
 
     teclado = [
-        [
-            InlineKeyboardButton(
-                "▶️ ENCENDER ANÁLISIS",
-                callback_data="encender"
-            )
-        ]
+    teclado = [
+    [
+        InlineKeyboardButton(
+            "▶️ ENCENDER ANÁLISIS",
+            callback_data="encender"
+        ),
+        InlineKeyboardButton(
+            "⏹️ APAGAR ANÁLISIS",
+            callback_data="apagar"
+        )
+    ]
     ]
 
     await app.bot.send_message(
