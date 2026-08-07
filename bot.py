@@ -189,7 +189,8 @@ async def analizar_loop(app):
             )
 
 
-        async def inicio(app):
+async def inicio(app):
+
     await app.bot.send_message(
         chat_id=CHAT_ID,
         text="""🚀 XAU Sniper AI V3.0 iniciado correctamente.
