@@ -276,3 +276,96 @@ ATR: {atr:.2f}
 
 
     return "😴 Sin señal"
+
+def analizar():
+
+    df_5m = calcular_indicadores(
+        obtener_datos("5min")
+    )
+
+    df_15m = calcular_indicadores(
+        obtener_datos("15min")
+    )
+
+    vela5 = df_5m.iloc[-1]
+    vela15 = df_15m.iloc[-1]
+
+    tendencia5 = tendencia(df_5m)
+    tendencia15 = tendencia(df_15m)
+
+    compra = (
+        tendencia5 == "ALCISTA"
+        and tendencia15 == "ALCISTA"
+        and vela5["RSI"] > 55
+        and vela5["ADX"] > 25
+    )
+
+    venta = (
+        tendencia5 == "BAJISTA"
+        and tendencia15 == "BAJISTA"
+        and vela5["RSI"] < 45
+        and vela5["ADX"] > 25
+    )
+
+    if not compra and not venta:
+        return "😴 Sin señal"
+
+    entrada = round(vela5["close"], 2)
+    atr = round(vela5["ATR"], 2)
+
+    if compra:
+        direccion = "COMPRA"
+        sl = round(entrada - atr * 1.5, 2)
+        tp = round(entrada + atr * 3, 2)
+
+    else:
+        direccion = "VENTA"
+        sl = round(entrada + atr * 1.5, 2)
+        tp = round(entrada - atr * 3, 2)
+
+    confianza = 70
+
+    if vela5["ADX"] > 30:
+        confianza += 10
+
+    if (
+        tendencia5 == tendencia15
+    ):
+        confianza += 10
+
+    if (
+        compra and vela5["RSI"] >= 60
+    ) or (
+        venta and vela5["RSI"] <= 40
+    ):
+        confianza += 10
+
+    confianza = min(confianza, 100)
+    
+    identificador = uuid.uuid4().hex[:6]
+
+    return f"""🥇 XAU SNIPER AI V3.1
+
+ID: {identificador}
+
+🟢 {"COMPRA" if direccion == "COMPRA" else "VENTA"}
+
+⭐ Confianza: {confianza}%
+
+📊 Tendencia:
+5M: {tendencia5}
+15M: {tendencia15}
+
+📋 OPERACIÓN
+
+Entrada: {entrada:.2f}
+
+🛑 Stop Loss:
+{sl:.2f}
+
+🎯 Take Profit:
+{tp:.2f}
+
+RSI: {vela5['RSI']:.1f}
+ADX: {vela5['ADX']:.1f}
+ATR: {vela5['ATR']:.2f}"""
