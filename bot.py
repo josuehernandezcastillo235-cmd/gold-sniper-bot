@@ -67,49 +67,58 @@ def guardar_senal(texto):
 
 async def botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-    query = update.callback_query
-    await query.answer()
+    global analisis_activo
 
-    if query.data not in ["tomar", "ignorar"]:
-        return
+    query = update.callback_query
+
+    await query.answer()
 
     historial = cargar_historial()
 
-    if len(historial) == 0:
-        await query.answer(
-            "No hay señales disponibles.",
-            show_alert=True
+
+    if query.data == "encender":
+
+        analisis_activo = True
+
+        await query.edit_message_text(
+            "🟢 Análisis ENCENDIDO\n\n"
+            "💰 Twelve Data activo\n"
+            "📊 Buscando señales XAU/USD"
         )
+
         return
 
+
+    if not historial:
+
+        await query.message.reply_text(
+            "⚠️ No hay señales guardadas."
+        )
+
+        return
+
+
     if query.data == "tomar":
+
         historial[-1]["estado"] = "TOMADA"
 
+
     elif query.data == "ignorar":
+
         historial[-1]["estado"] = "IGNORADA"
 
-            elif query.data == "encender":
-
-            global analisis_activo
-
-            analisis_activo = True
-
-            await query.edit_message_text(
-                "🟢 Análisis ENCENDIDO\n\n"
-                "💰 Twelve Data activo\n"
-                "📊 Buscando señales XAU/USD"
-            )
 
     guardar_historial(historial)
+
 
     await query.edit_message_reply_markup(
         reply_markup=None
     )
 
+
     await query.message.reply_text(
         f"✅ Señal marcada como: {historial[-1]['estado']}"
     )
-
 
 async def analizar_loop(app):
 
