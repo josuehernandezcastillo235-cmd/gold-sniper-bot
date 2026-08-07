@@ -189,18 +189,14 @@ print("🚀 INICIANDO XAU SNIPER")
 
 async def main():
 
-    app = (
-        Application
-        .builder()
-        .token(TOKEN)
-        .build()
-    )
+    app = Application.builder().token(TOKEN).build()
 
     app.add_handler(
         CallbackQueryHandler(botones)
     )
 
     await app.initialize()
+
     await app.start()
 
     await app.updater.start_polling()
