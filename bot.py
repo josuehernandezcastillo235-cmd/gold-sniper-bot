@@ -200,19 +200,19 @@ async def main():
     )
 
     await app.initialize()
-    await app.start()
+await app.start()
 
-    await inicio(app)
+await inicio(app)
 
-    asyncio.create_task(
-        analizar_loop(app)
-    )
+asyncio.create_task(
+    analizar_loop(app)
+)
 
-    await app.updater.start_polling()
+await app.updater.start_polling()
 
-    # Mantener vivo el bot
-    while True:
-        await asyncio.sleep(3600)
+# Mantener vivo el bot
+while True:
+    await asyncio.sleep(3600)
 
 
 if __name__ == "__main__":
