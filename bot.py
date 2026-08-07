@@ -88,17 +88,17 @@ async def botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data == "ignorar":
         historial[-1]["estado"] = "IGNORADA"
 
-    elif query.data == "encender":
+            elif query.data == "encender":
 
-    global analisis_activo
+            global analisis_activo
 
-    analisis_activo = True
+            analisis_activo = True
 
-    await query.edit_message_text(
-        "🟢 Análisis ENCENDIDO\n\n"
-        "💰 Twelve Data activo\n"
-        "📊 Buscando señales XAU/USD"
-    )
+            await query.edit_message_text(
+                "🟢 Análisis ENCENDIDO\n\n"
+                "💰 Twelve Data activo\n"
+                "📊 Buscando señales XAU/USD"
+            )
 
     guardar_historial(historial)
 
