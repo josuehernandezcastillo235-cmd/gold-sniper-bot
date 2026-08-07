@@ -22,6 +22,7 @@ ARCHIVO = "historial.json"
 
 ultima_senal = ""
 ultima_alerta_tiempo = None
+analisis_activo = False
 
 
 def cargar_historial():
@@ -101,6 +102,57 @@ async def botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"✅ Señal marcada como: {historial[-1]['estado']}"
     )
 
+async def control_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    global analisis_activo
+
+    query = update.callback_query
+
+    await query.answer()
+
+    if query.data == "encender":
+
+        analisis_activo = True
+
+        teclado = [
+            [
+                InlineKeyboardButton(
+                    "⏸️ APAGAR ANÁLISIS",
+                    callback_data="apagar"
+                )
+            ]
+        ]
+
+        await query.edit_message_text(
+            "🥇 XAU SNIPER AI V3.0\n\n"
+            "🟢 ANÁLISIS ACTIVADO\n"
+            "📊 Mercado: XAU/USD\n"
+            "⏱️ Revisión: cada 100 segundos\n"
+            "💰 Consultas a Twelve Data: ACTIVAS",
+            reply_markup=InlineKeyboardMarkup(teclado)
+        )
+
+    elif query.data == "apagar":
+
+        analisis_activo = False
+
+        teclado = [
+            [
+                InlineKeyboardButton(
+                    "▶️ ENCENDER ANÁLISIS",
+                    callback_data="encender"
+                )
+            ]
+        ]
+
+        await query.edit_message_text(
+            "🥇 XAU SNIPER AI V3.0\n\n"
+            "🔴 ANÁLISIS PAUSADO\n"
+            "📊 Mercado: XAU/USD\n"
+            "💰 Consultas a Twelve Data: DETENIDAS\n\n"
+            "Pulsa el botón para volver a analizar.",
+            reply_markup=InlineKeyboardMarkup(teclado)
+        )
 
 
 async def analizar_loop(app):
@@ -108,6 +160,10 @@ async def analizar_loop(app):
     global ultima_senal, ultima_alerta_tiempo
 
     while True:
+
+        if not analisis_activo:
+            await asyncio.sleep(5)
+            continue
 
         try:
             senal = analizar()
@@ -189,6 +245,15 @@ async def analizar_loop(app):
 
 async def inicio(app):
 
+    teclado = [
+        [
+            InlineKeyboardButton(
+                "▶️ ENCENDER ANÁLISIS",
+                callback_data="encender"
+            )
+        ]
+    ]
+
     await app.bot.send_message(
         chat_id=CHAT_ID,
         text="""🚀 XAU Sniper AI V3.0 iniciado correctamente.
@@ -196,11 +261,12 @@ async def inicio(app):
 ✅ Conexión Telegram: OK
 ✅ Estrategia V3.0 cargada
 📊 Mercado: XAU/USD
-🧠 Historial activado"""
+🧠 Historial activado
+
+🔴 Análisis actualmente APAGADO
+💰 Twelve Data no está consumiendo créditos.""",
+        reply_markup=InlineKeyboardMarkup(teclado)
     )
-
-print("🚀 INICIANDO XAU SNIPER")
-
 
 async def main():
 
@@ -208,6 +274,13 @@ async def main():
 
     app.add_handler(
         CallbackQueryHandler(botones)
+    )
+
+    app.add_handler(
+        CallbackQueryHandler(
+            control_bot,
+            pattern="^(encender|apagar)$"
+        )
     )
 
     await app.initialize()
