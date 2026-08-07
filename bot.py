@@ -103,9 +103,9 @@ async def botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def analizar_loop(app):
+async def analizar_loop(app):
 
-    global ultima_senal
-
+    global ultima_senal, ultima_alerta_tiempo
 
     while True:
 
@@ -113,12 +113,36 @@ async def analizar_loop(app):
 
             senal = analizar()
 
+            ahora = datetime.now()
 
-            if (
-                ("COMPRA" in senal or "VENTA" in senal)
-                and senal != ultima_senal
-            ):
+            es_compra = "COMPRA" in senal
+            es_venta = "VENTA" in senal
 
+            direccion = ""
+
+            if es_compra:
+                direccion = "COMPRA"
+
+            elif es_venta:
+                direccion = "VENTA"
+
+
+            puede_enviar = True
+
+
+            if direccion == ultima_senal and ultima_alerta_tiempo:
+
+                diferencia = (
+                    ahora - ultima_alerta_tiempo
+                ).total_seconds()
+
+
+                if diferencia < 900:  # 15 minutos
+                    puede_enviar = False
+
+
+
+            if direccion and puede_enviar:
 
                 teclado = [
                     [
@@ -135,7 +159,7 @@ async def analizar_loop(app):
                 ]
 
 
-                mensaje = await app.bot.send_message(
+                await app.bot.send_message(
                     chat_id=CHAT_ID,
                     text=senal,
                     reply_markup=InlineKeyboardMarkup(
@@ -147,18 +171,19 @@ async def analizar_loop(app):
                 guardar_senal(senal)
 
 
-                ultima_senal = senal
+                ultima_senal = direccion
+                ultima_alerta_tiempo = ahora
 
 
 
             elif "😴 Sin señal" in senal:
 
                 ultima_senal = ""
+                ultima_alerta_tiempo = None
 
 
 
         except Exception as e:
-
 
             await app.bot.send_message(
                 chat_id=CHAT_ID,
@@ -166,14 +191,7 @@ async def analizar_loop(app):
             )
 
 
-
         await asyncio.sleep(30)
-
-
-
-
-async def inicio(app):
-
     await app.bot.send_message(
         chat_id=CHAT_ID,
         text="""🚀 XAU Sniper AI V3.0 iniciado correctamente.
