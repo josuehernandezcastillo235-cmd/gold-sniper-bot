@@ -111,6 +111,8 @@ async def analizar_loop(app):
 
         try:
             senal = analizar()
+            
+            print("🔍 Analizando...")
 
             ahora = datetime.now()
 
