@@ -181,9 +181,12 @@ async def analizar_loop(app):
                 ultima_alerta_tiempo = None
 
 
+        except Exception as e:
 
-                except Exception as e:
-
+            await app.bot.send_message(
+                chat_id=CHAT_ID,
+                text=f"❌ Error:\n{e}"
+            )
             await app.bot.send_message(
                 chat_id=CHAT_ID,
                 text=f"❌ Error:\n{e}"
