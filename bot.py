@@ -88,6 +88,18 @@ async def botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data == "ignorar":
         historial[-1]["estado"] = "IGNORADA"
 
+    elif query.data == "encender":
+
+    global analisis_activo
+
+    analisis_activo = True
+
+    await query.edit_message_text(
+        "🟢 Análisis ENCENDIDO\n\n"
+        "💰 Twelve Data activo\n"
+        "📊 Buscando señales XAU/USD"
+    )
+
     guardar_historial(historial)
 
     await query.edit_message_reply_markup(
@@ -106,10 +118,11 @@ async def analizar_loop(app):
     while True:
 
         if not analisis_activo:
-            await asyncio.sleep(5)
+            await asyncio.sleep(10)
             continue
 
         try:
+
             senal = analizar()
             
             print("🔍 Analizando...")
