@@ -182,11 +182,8 @@ async def analizar_loop(app):
 
 
         except Exception as e:
-
-            await app.bot.send_message(
-                chat_id=CHAT_ID,
-                text=f"❌ Error:\n{e}"
-            )
+except Exception as e:
+    print(f"❌ Error: {e}")
 
 
 async def inicio(app):
