@@ -187,10 +187,6 @@ async def analizar_loop(app):
                 chat_id=CHAT_ID,
                 text=f"❌ Error:\n{e}"
             )
-            await app.bot.send_message(
-                chat_id=CHAT_ID,
-                text=f"❌ Error:\n{e}"
-            )
 
 
 async def inicio(app):
