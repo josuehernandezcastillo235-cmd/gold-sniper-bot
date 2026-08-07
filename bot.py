@@ -75,60 +75,57 @@ async def botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     historial = cargar_historial()
 
-
     if query.data == "encender":
 
-    analisis_activo = True
+        analisis_activo = True
 
-    teclado = [
-        [
-            InlineKeyboardButton(
-                "▶️ ENCENDER ANÁLISIS",
-                callback_data="encender"
-            ),
-            InlineKeyboardButton(
-                "⏹️ APAGAR ANÁLISIS",
-                callback_data="apagar"
-            )
+        teclado = [
+            [
+                InlineKeyboardButton(
+                    "▶️ ENCENDER ANÁLISIS",
+                    callback_data="encender"
+                ),
+                InlineKeyboardButton(
+                    "⏹️ APAGAR ANÁLISIS",
+                    callback_data="apagar"
+                )
+            ]
         ]
-    ]
 
-    await query.edit_message_text(
-        "🟢 Análisis ENCENDIDO\n\n"
-        "💰 Twelve Data activo\n"
-        "📊 Buscando señales XAU/USD",
-        reply_markup=InlineKeyboardMarkup(teclado)
-    )
+        await query.edit_message_text(
+            "🟢 Análisis ENCENDIDO\n\n"
+            "💰 Twelve Data activo\n"
+            "📊 Buscando señales XAU/USD",
+            reply_markup=InlineKeyboardMarkup(teclado)
+        )
 
-    return
-
+        return
 
     if query.data == "apagar":
 
-    analisis_activo = False
+        analisis_activo = False
 
-    teclado = [
-        [
-            InlineKeyboardButton(
-                "▶️ ENCENDER ANÁLISIS",
-                callback_data="encender"
-            ),
-            InlineKeyboardButton(
-                "⏹️ APAGAR ANÁLISIS",
-                callback_data="apagar"
-            )
+        teclado = [
+            [
+                InlineKeyboardButton(
+                    "▶️ ENCENDER ANÁLISIS",
+                    callback_data="encender"
+                ),
+                InlineKeyboardButton(
+                    "⏹️ APAGAR ANÁLISIS",
+                    callback_data="apagar"
+                )
+            ]
         ]
-    ]
 
-    await query.edit_message_text(
-        "🔴 Análisis APAGADO\n\n"
-        "💰 Twelve Data detenido\n"
-        "📊 No se están buscando señales",
-        reply_markup=InlineKeyboardMarkup(teclado)
-    )
+        await query.edit_message_text(
+            "🔴 Análisis APAGADO\n\n"
+            "💰 Twelve Data detenido\n"
+            "📊 No se están buscando señales",
+            reply_markup=InlineKeyboardMarkup(teclado)
+        )
 
-    return
-
+        return
 
     if not historial:
 
@@ -138,24 +135,19 @@ async def botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         return
 
-
     if query.data == "tomar":
 
         historial[-1]["estado"] = "TOMADA"
-
 
     elif query.data == "ignorar":
 
         historial[-1]["estado"] = "IGNORADA"
 
-
     guardar_historial(historial)
-
 
     await query.edit_message_reply_markup(
         reply_markup=None
     )
-
 
     await query.message.reply_text(
         f"✅ Señal marcada como: {historial[-1]['estado']}"
