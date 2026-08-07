@@ -186,6 +186,7 @@ async def inicio(app):
 
 print("🚀 INICIANDO XAU SNIPER")
 
+
 async def main():
 
     app = (
@@ -202,17 +203,20 @@ async def main():
     await app.initialize()
     await app.start()
 
+    await app.updater.start_polling()
+
     await inicio(app)
-    
-asyncio.create_task(
-    analizar_loop(app)
-)
 
-await app.updater.start_polling()
+    asyncio.create_task(
+        analizar_loop(app)
+    )
 
-# Mantener vivo el bot
-while True:
-    await asyncio.sleep(3600)
+    print("✅ XAU SNIPER V3.0 ACTIVO")
+
+    # Mantener vivo el bot
+    while True:
+        await asyncio.sleep(3600)
+
 
 
 if __name__ == "__main__":
