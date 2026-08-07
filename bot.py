@@ -195,31 +195,25 @@ async def main():
         .build()
     )
 
-
     app.add_handler(
         CallbackQueryHandler(botones)
     )
 
-
     await app.initialize()
-
     await app.start()
 
     await inicio(app)
-
 
     asyncio.create_task(
         analizar_loop(app)
     )
 
-
     await app.updater.start_polling()
 
-
-    await app.updater.idle()
-
+    # Mantener vivo el bot
+    while True:
+        await asyncio.sleep(3600)
 
 
 if __name__ == "__main__":
-
     asyncio.run(main())
