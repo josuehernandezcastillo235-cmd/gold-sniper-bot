@@ -200,10 +200,10 @@ async def main():
     )
 
     await app.initialize()
-await app.start()
+    await app.start()
 
-await inicio(app)
-
+    await inicio(app)
+    
 asyncio.create_task(
     analizar_loop(app)
 )
