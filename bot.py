@@ -11,6 +11,7 @@ import json
 from datetime import datetime
 
 from strategy import analizar
+print("🔥 BOT.PY V3.0 CARGADO")
 
 
 TOKEN = os.getenv("BOT_TOKEN")
@@ -183,7 +184,7 @@ async def inicio(app):
 🧠 Historial activado"""
     )
 
-
+print("🚀 INICIANDO XAU SNIPER")
 
 async def main():
 
