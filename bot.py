@@ -213,10 +213,8 @@ async def main():
 
     print("✅ XAU SNIPER V3.0 ACTIVO")
 
-    # Mantener vivo el bot
     while True:
         await asyncio.sleep(3600)
-
 
 
 if __name__ == "__main__":
