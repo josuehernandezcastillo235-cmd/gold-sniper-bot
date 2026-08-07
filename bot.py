@@ -21,6 +21,7 @@ ARCHIVO = "historial.json"
 
 
 ultima_senal = ""
+ultima_alerta_tiempo = None
 
 
 def cargar_historial():
