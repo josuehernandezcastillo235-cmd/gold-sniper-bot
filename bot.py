@@ -102,7 +102,7 @@ async def botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 
- async def analizar_loop(app):
+async def analizar_loop(app):
 
     global ultima_senal, ultima_alerta_tiempo
 
