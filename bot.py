@@ -220,7 +220,6 @@ async def analizar_loop(app):
 async def inicio(app):
 
     teclado = [
-    teclado = [
     [
         InlineKeyboardButton(
             "▶️ ENCENDER ANÁLISIS",
@@ -231,7 +230,7 @@ async def inicio(app):
             callback_data="apagar"
         )
     ]
-    ]
+]
 
     await app.bot.send_message(
         chat_id=CHAT_ID,
