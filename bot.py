@@ -68,70 +68,25 @@ def guardar_senal(texto):
 async def botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     query = update.callback_query
-
     await query.answer()
 
+    if query.data not in ["tomar", "ignorar"]:
+        return
 
     historial = cargar_historial()
 
-
-    if historial:
-
-        if query.data == "tomar":
-
-            historial[-1]["estado"] = "TOMADA"
-
-
-        elif query.data == "ignorar":
-
-            historial[-1]["estado"] = "IGNORADA"
-
-
-
-        guardar_historial(historial)
-
-
-
-    if not historial:
-    await query.answer(
-        "Todavía no hay ninguna señal para marcar.",
-        show_alert=True
-    )
-    return
-
-await query.edit_message_reply_markup(
-    reply_markup=None
-)
-
-await query.message.reply_text(
-    f"✅ Señal marcada como: {historial[-1]['estado']}"
-            )
-
-async def botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    query = update.callback_query
-
-    await query.answer()
-
-    historial = cargar_historial()
-
-    if not historial:
+    if len(historial) == 0:
         await query.answer(
-            "Todavía no hay ninguna señal para marcar.",
+            "No hay señales disponibles.",
             show_alert=True
         )
         return
 
     if query.data == "tomar":
-
         historial[-1]["estado"] = "TOMADA"
 
     elif query.data == "ignorar":
-
         historial[-1]["estado"] = "IGNORADA"
-
-    else:
-        return
 
     guardar_historial(historial)
 
