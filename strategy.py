@@ -19,7 +19,7 @@ def obtener_datos(intervalo):
         "https://api.twelvedata.com/time_series"
         f"?symbol={SYMBOL}"
         f"&interval={intervalo}"
-        "&outputsize=250"
+        "&outputsize=100"
         f"&apikey={API_KEY}"
     )
 
