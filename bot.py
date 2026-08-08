@@ -160,14 +160,15 @@ async def analizar_loop(app):
     while True:
 
         if not analisis_activo:
-            await asyncio.sleep(10)
+            await asyncio.sleep(1)
             continue
 
         try:
 
-            senal = analizar()
-            
             print("🔍 Analizando...")
+
+            # Ejecutar el análisis fuera del event loop
+            senal = await asyncio.to_thread(analizar)
 
             ahora = datetime.now()
 
@@ -182,9 +183,7 @@ async def analizar_loop(app):
             elif es_venta:
                 direccion = "VENTA"
 
-
             puede_enviar = True
-
 
             if direccion == ultima_senal and ultima_alerta_tiempo:
 
@@ -192,11 +191,8 @@ async def analizar_loop(app):
                     ahora - ultima_alerta_tiempo
                 ).total_seconds()
 
-
-                if diferencia < 900:  # 15 minutos
+                if diferencia < 900:
                     puede_enviar = False
-
-
 
             if direccion and puede_enviar:
 
@@ -206,7 +202,6 @@ async def analizar_loop(app):
                             "✅ Tomar operación",
                             callback_data="tomar"
                         ),
-
                         InlineKeyboardButton(
                             "❌ Ignorar",
                             callback_data="ignorar"
@@ -214,32 +209,28 @@ async def analizar_loop(app):
                     ]
                 ]
 
-
                 await app.bot.send_message(
                     chat_id=CHAT_ID,
                     text=senal,
-                    reply_markup=InlineKeyboardMarkup(
-                        teclado
-                    )
+                    reply_markup=InlineKeyboardMarkup(teclado)
                 )
-
 
                 guardar_senal(senal)
 
-
                 ultima_senal = direccion
                 ultima_alerta_tiempo = ahora
-
-
 
             elif "😴 Sin señal" in senal:
 
                 ultima_senal = ""
                 ultima_alerta_tiempo = None
 
-
         except Exception as e:
+
             print(f"❌ Error: {e}")
+
+        # Revisar aproximadamente cada 100 segundos
+        await asyncio.sleep(100)
 
 
 async def inicio(app):
