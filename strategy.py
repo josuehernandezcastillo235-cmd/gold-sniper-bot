@@ -287,70 +287,262 @@ def analizar():
         obtener_datos("15min")
     )
 
+    if df_5m.empty or df_15m.empty:
+        return "😴 Sin señal"
+
     vela5 = df_5m.iloc[-1]
+    anterior5 = df_5m.iloc[-2]
+
     vela15 = df_15m.iloc[-1]
+
+    # =========================
+    # DATOS PRINCIPALES
+    # =========================
+
+    precio = float(vela5["close"])
+
+    ema20 = float(vela5["EMA20"])
+    ema50 = float(vela5["EMA50"])
+    ema200 = float(vela5["EMA200"])
+
+    rsi = float(vela5["RSI"])
+    adx = float(vela5["ADX"])
+    atr = float(vela5["ATR"])
+
+    close_anterior = float(anterior5["close"])
+    ema20_anterior = float(anterior5["EMA20"])
+
+    # =========================
+    # TENDENCIA
+    # =========================
 
     tendencia5 = tendencia(df_5m)
     tendencia15 = tendencia(df_15m)
 
+    # =========================
+    # DIRECCIÓN DE EMA
+    # =========================
+
+    emas_alcistas = (
+        ema20 > ema50
+        and ema50 > ema200
+    )
+
+    emas_bajistas = (
+        ema20 < ema50
+        and ema50 < ema200
+    )
+
+    # =========================
+    # PENDIENTE EMA20
+    # =========================
+
+    ema20_subiendo = ema20 > ema20_anterior
+    ema20_bajando = ema20 < ema20_anterior
+
+    # =========================
+    # DISTANCIA A EMA20
+    # =========================
+
+    distancia_ema = abs(precio - ema20)
+
+    cerca_ema = distancia_ema <= atr * 0.8
+
+    demasiado_lejos = distancia_ema > atr * 1.5
+
+    # =========================
+    # CONFIRMACIÓN DE VELA
+    # =========================
+
+    vela_alcista = (
+        float(vela5["close"]) > float(vela5["open"])
+    )
+
+    vela_bajista = (
+        float(vela5["close"]) < float(vela5["open"])
+    )
+
+    # =========================
+    # PULLBACK
+    # =========================
+
+    pullback_compra = (
+        close_anterior <= ema20_anterior
+        and precio > ema20
+    )
+
+    pullback_venta = (
+        close_anterior >= ema20_anterior
+        and precio < ema20
+    )
+
+    # =========================
+    # FILTRO DE MERCADO
+    # =========================
+
+    mercado_fuerte = adx >= 25
+
+    # =========================
+    # COMPRA
+    # =========================
+
     compra = (
         tendencia5 == "ALCISTA"
         and tendencia15 == "ALCISTA"
-        and vela5["RSI"] > 55
-        and vela5["ADX"] > 25
+        and emas_alcistas
+        and ema20_subiendo
+        and mercado_fuerte
+        and rsi >= 52
+        and rsi <= 68
+        and cerca_ema
+        and not demasiado_lejos
+        and vela_alcista
     )
+
+    # =========================
+    # VENTA
+    # =========================
 
     venta = (
         tendencia5 == "BAJISTA"
         and tendencia15 == "BAJISTA"
-        and vela5["RSI"] < 45
-        and vela5["ADX"] > 25
+        and emas_bajistas
+        and ema20_bajando
+        and mercado_fuerte
+        and rsi >= 32
+        and rsi <= 48
+        and cerca_ema
+        and not demasiado_lejos
+        and vela_bajista
     )
+
+    # =========================
+    # CONFIRMACIÓN EXTRA
+    # =========================
+
+    if compra and not pullback_compra:
+        return "😴 Sin señal"
+
+    if venta and not pullback_venta:
+        return "😴 Sin señal"
 
     if not compra and not venta:
         return "😴 Sin señal"
 
-    entrada = round(vela5["close"], 2)
-    atr = round(vela5["ATR"], 2)
+    # =========================
+    # ENTRADA
+    # =========================
+
+    entrada = round(precio, 2)
+    atr = round(atr, 2)
 
     if compra:
+
         direccion = "COMPRA"
-        sl = round(entrada - atr * 1.5, 2)
-        tp = round(entrada + atr * 3, 2)
+
+        sl = round(
+            entrada - atr * 1.5,
+            2
+        )
+
+        tp = round(
+            entrada + atr * 3,
+            2
+        )
 
     else:
+
         direccion = "VENTA"
-        sl = round(entrada + atr * 1.5, 2)
-        tp = round(entrada - atr * 3, 2)
 
-    confianza = 70
+        sl = round(
+            entrada + atr * 1.5,
+            2
+        )
 
-    if vela5["ADX"] > 30:
-        confianza += 10
+        tp = round(
+            entrada - atr * 3,
+            2
+        )
 
+    # =========================
+    # SCORE
+    # =========================
+
+    score = 0
+
+    # Tendencia 5M
     if (
-        tendencia5 == tendencia15
+        (compra and tendencia5 == "ALCISTA")
+        or
+        (venta and tendencia5 == "BAJISTA")
     ):
-        confianza += 10
+        score += 15
 
+    # Tendencia 15M
     if (
-        compra and vela5["RSI"] >= 60
+        (compra and tendencia15 == "ALCISTA")
+        or
+        (venta and tendencia15 == "BAJISTA")
+    ):
+        score += 15
+
+    # EMA alineadas
+    if compra and emas_alcistas:
+        score += 15
+
+    if venta and emas_bajistas:
+        score += 15
+
+    # ADX
+    if adx >= 30:
+        score += 15
+    elif adx >= 25:
+        score += 10
+
+    # RSI saludable
+    if compra and 55 <= rsi <= 65:
+        score += 10
+
+    elif venta and 35 <= rsi <= 45:
+        score += 10
+
+    # Precio cerca de EMA20
+    if cerca_ema:
+        score += 10
+
+    # Pullback confirmado
+    if pullback_compra or pullback_venta:
+        score += 10
+
+    # Vela de confirmación
+    if (
+        compra and vela_alcista
     ) or (
-        venta and vela5["RSI"] <= 40
+        venta and vela_bajista
     ):
-        confianza += 10
+        score += 10
 
-    confianza = min(confianza, 100)
-    
+    score = min(score, 100)
+
+    # =========================
+    # ID
+    # =========================
+
     identificador = uuid.uuid4().hex[:6]
 
-    return f"""🥇 XAU SNIPER AI V3.1
+    # =========================
+    # MENSAJE
+    # =========================
+
+    emoji = "🟢" if direccion == "COMPRA" else "🔴"
+
+    return f"""🥇 XAU SNIPER AI V3.2
 
 ID: {identificador}
 
-🟢 {"COMPRA" if direccion == "COMPRA" else "VENTA"}
+{emoji} {direccion}
 
-⭐ Confianza: {confianza}%
+⭐ Calidad de señal: {score}/100
 
 📊 Tendencia:
 5M: {tendencia5}
@@ -366,6 +558,13 @@ Entrada: {entrada:.2f}
 🎯 Take Profit:
 {tp:.2f}
 
-RSI: {vela5['RSI']:.1f}
-ADX: {vela5['ADX']:.1f}
-ATR: {vela5['ATR']:.2f}"""
+📈 RSI: {rsi:.1f}
+📊 ADX: {adx:.1f}
+📏 ATR: {atr:.2f}
+
+EMA20: {ema20:.2f}
+EMA50: {ema50:.2f}
+EMA200: {ema200:.2f}
+
+🔄 Pullback confirmado
+"""
