@@ -437,6 +437,7 @@ def analizar():
 
         # -------------------------------------------------
         # VENTA
+        # RSI AMPLIADO: 32 - 52
         # -------------------------------------------------
 
         venta = (
@@ -445,7 +446,7 @@ def analizar():
             and emas_bajistas
             and ema20_bajando
             and mercado_fuerte
-            and 32 <= rsi <= 48
+            and 32 <= rsi <= 52
             and cerca_ema
             and not demasiado_lejos
             and vela_bajista
@@ -533,10 +534,8 @@ def analizar():
 
         score = 0
 
-        # Tendencia 5M
         score += 15
 
-        # Confirmación 15M
         if tendencia15 in [
             "ALCISTA",
             "BAJISTA"
@@ -545,36 +544,30 @@ def analizar():
         else:
             score += 10
 
-        # EMAs
         if compra and emas_alcistas:
             score += 15
 
         elif venta and emas_bajistas:
             score += 15
 
-        # ADX
         if adx >= 30:
             score += 15
 
         elif adx >= 25:
             score += 10
 
-        # RSI
         if compra and 55 <= rsi <= 65:
             score += 10
 
         elif venta and 35 <= rsi <= 45:
             score += 10
 
-        # Cercanía EMA
         if cerca_ema:
             score += 10
 
-        # Pullback
         if pullback_compra or pullback_venta:
             score += 10
 
-        # Vela
         if (
             compra and vela_alcista
         ) or (
@@ -646,4 +639,4 @@ EMA200: {ema200:.2f}
 
         return (
             f"❌ Error estrategia: {e}"
-    )
+        )
