@@ -11,7 +11,7 @@ import json
 from datetime import datetime
 
 from strategy import analizar
-print("🔥 BOT.PY V3.0 CARGADO")
+print("🔥 BOT.PY V3.2 CARGADO")
 
 
 TOKEN = os.getenv("BOT_TOKEN")
@@ -250,10 +250,10 @@ async def inicio(app):
 
     await app.bot.send_message(
         chat_id=CHAT_ID,
-        text="""🚀 XAU Sniper AI V3.0 iniciado correctamente.
+        text="""🚀 XAU Sniper AI V3.2 iniciado correctamente.
 
 ✅ Conexión Telegram: OK
-✅ Estrategia V3.0 cargada
+✅ Estrategia V3.2 cargada
 📊 Mercado: XAU/USD
 🧠 Historial activado
 
@@ -282,7 +282,7 @@ async def main():
         analizar_loop(app)
     )
 
-    print("✅ XAU SNIPER V3.0 ACTIVO")
+    print("✅ XAU SNIPER V3.2 ACTIVO")
 
     while True:
         await asyncio.sleep(3600)
