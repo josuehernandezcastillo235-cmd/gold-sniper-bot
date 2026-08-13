@@ -172,6 +172,7 @@ def analizar():
         # -------------------------------------------------
 
         df5 = obtener_datos("5min")
+        print("✅ Datos 5M recibidos")
         df15 = obtener_datos("15min")
 
         if df5.empty or df15.empty:
