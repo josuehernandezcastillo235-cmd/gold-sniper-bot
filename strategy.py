@@ -173,6 +173,7 @@ def analizar():
 
         df5 = obtener_datos("5min")
         print("✅ Datos 5M recibidos")
+
         df15 = obtener_datos("15min")
         print("✅ Datos 15M recibidos")
 
@@ -185,9 +186,11 @@ def analizar():
 
         df5 = calcular_indicadores(df5)
         df15 = calcular_indicadores(df15)
-        print("📊 Llegó al análisis de condiciones")
+
+        print("✅ Indicadores calculados")
 
         if len(df5) < 210 or len(df15) < 210:
+            print("⚠️ Historial insuficiente")
             return "😴 Sin señal"
 
         # -------------------------------------------------
@@ -198,7 +201,7 @@ def analizar():
         anterior5 = df5.iloc[-2]
 
         # -------------------------------------------------
-        # DATOS
+        # DATOS PRINCIPALES
         # -------------------------------------------------
 
         precio = float(
@@ -282,7 +285,7 @@ def analizar():
         tendencia15 = tendencia(df15)
 
         # -------------------------------------------------
-        # EMAS
+        # EMAS ALINEADAS
         # -------------------------------------------------
 
         emas_alcistas = (
@@ -308,19 +311,17 @@ def analizar():
         )
 
         # -------------------------------------------------
-        # DISTANCIA A EMA20
+        # DISTANCIA EMA20
         # -------------------------------------------------
 
         distancia_ema = abs(
             precio - ema20
         )
 
-        # Zona razonable alrededor de EMA20
         cerca_ema = (
             distancia_ema <= atr * 1.5
         )
 
-        # Evita perseguir movimientos demasiado extendidos
         demasiado_lejos = (
             distancia_ema > atr * 2.0
         )
@@ -352,7 +353,7 @@ def analizar():
         )
 
         # -------------------------------------------------
-        # TOQUE DE EMA20
+        # TOQUE EMA20
         # -------------------------------------------------
 
         toque_ema_compra = (
@@ -398,14 +399,6 @@ def analizar():
         # -------------------------------------------------
         # CONFIRMACIÓN 15M
         # -------------------------------------------------
-        #
-        # Si 15M está claramente en tendencia,
-        # exigimos esa tendencia.
-        #
-        # Si 15M está lateral pero las EMAs de 5M
-        # están perfectamente alineadas y ADX es fuerte,
-        # permitimos la entrada.
-        #
 
         confirmacion15_compra = (
             tendencia15 == "ALCISTA"
@@ -460,18 +453,36 @@ def analizar():
         )
 
         # -------------------------------------------------
-        # SIN SEÑAL
+        # DIAGNÓSTICO
         # -------------------------------------------------
 
         print(
-            f"🧪 COMPRA={compra} | VENTA={venta}"
+            f"📊 5M={tendencia5} | "
+            f"15M={tendencia15} | "
+            f"RSI={rsi:.1f} | "
+            f"ADX={adx:.1f} | "
+            f"EMA20={ema20:.2f} | "
+            f"EMA50={ema50:.2f} | "
+            f"EMA200={ema200:.2f} | "
+            f"PullbackC={pullback_compra} | "
+            f"PullbackV={pullback_venta} | "
+            f"CercaEMA={cerca_ema}"
         )
-        
+
+        print(
+            f"🧪 COMPRA={compra} | "
+            f"VENTA={venta}"
+        )
+
+        # -------------------------------------------------
+        # SIN SEÑAL
+        # -------------------------------------------------
+
         if not compra and not venta:
             return "😴 Sin señal"
 
         # -------------------------------------------------
-        # OPERACIÓN
+        # ENTRADA
         # -------------------------------------------------
 
         entrada = round(
@@ -483,6 +494,10 @@ def analizar():
             atr,
             2
         )
+
+        # -------------------------------------------------
+        # SL / TP
+        # -------------------------------------------------
 
         if compra:
 
@@ -631,4 +646,4 @@ EMA200: {ema200:.2f}
 
         return (
             f"❌ Error estrategia: {e}"
-        )
+    )
