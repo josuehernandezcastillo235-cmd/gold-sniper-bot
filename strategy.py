@@ -457,15 +457,15 @@ def analizar():
         # DIAGNÓSTICO
         # -------------------------------------------------
 
+         
         print(
             f"📊 5M={tendencia5} | "
             f"15M={tendencia15} | "
             f"RSI={rsi:.1f} | "
             f"ADX={adx:.1f} | "
-            f"EMA20={ema20:.2f} | "
-            f"EMA50={ema50:.2f} | "
-            f"EMA200={ema200:.2f} | "
-            f"PullbackC={pullback_compra} | "
+            f"EMA20↓={ema20_bajando} | "
+            f"VelaB={vela_bajista} | "
+            f"EMAsB={emas_bajistas} | "
             f"PullbackV={pullback_venta} | "
             f"CercaEMA={cerca_ema}"
         )
