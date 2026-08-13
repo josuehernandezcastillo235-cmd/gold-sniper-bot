@@ -185,7 +185,7 @@ def analizar():
 
         df5 = calcular_indicadores(df5)
         df15 = calcular_indicadores(df15)
-        print("✅ Indicadores calculados")
+        print("📊 Llegó al análisis de condiciones")
 
         if len(df5) < 210 or len(df15) < 210:
             return "😴 Sin señal"
@@ -463,6 +463,10 @@ def analizar():
         # SIN SEÑAL
         # -------------------------------------------------
 
+        print(
+            f"🧪 COMPRA={compra} | VENTA={venta}"
+        )
+        
         if not compra and not venta:
             return "😴 Sin señal"
 
