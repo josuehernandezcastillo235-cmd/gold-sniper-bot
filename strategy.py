@@ -174,6 +174,7 @@ def analizar():
         df5 = obtener_datos("5min")
         print("✅ Datos 5M recibidos")
         df15 = obtener_datos("15min")
+        print("✅ Datos 15M recibidos")
 
         if df5.empty or df15.empty:
             return "😴 Sin señal"
@@ -184,6 +185,7 @@ def analizar():
 
         df5 = calcular_indicadores(df5)
         df15 = calcular_indicadores(df15)
+        print("✅ Indicadores calculados")
 
         if len(df5) < 210 or len(df15) < 210:
             return "😴 Sin señal"
