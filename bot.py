@@ -1,16 +1,16 @@
-import asyncio
 import os
+import asyncio
 
 from telegram import (
+    Update,
     InlineKeyboardButton,
-    InlineKeyboardMarkup,
-    Update
+    InlineKeyboardMarkup
 )
 
 from telegram.ext import (
     Application,
-    CallbackQueryHandler,
     CommandHandler,
+    CallbackQueryHandler,
     ContextTypes
 )
 
@@ -26,20 +26,7 @@ CHAT_ID = os.getenv("CHAT_ID")
 
 INTERVALO = 100
 
-
-if not BOT_TOKEN:
-    raise Exception("❌ Falta BOT_TOKEN")
-
-if not CHAT_ID:
-    raise Exception("❌ Falta CHAT_ID")
-
-
-# =========================================================
-# ESTADO
-# =========================================================
-
-bot_activo = False
-tarea_analisis = None
+encendido = True
 
 ultima_alerta = None
 
@@ -48,23 +35,17 @@ ultima_alerta = None
 # BOTONES
 # =========================================================
 
-def teclado_principal():
+def teclado():
 
     keyboard = [
         [
             InlineKeyboardButton(
-                "▶️ ENCENDER",
+                "🟢 ENCENDER",
                 callback_data="encender"
             ),
             InlineKeyboardButton(
-                "⏹️ APAGAR",
+                "🔴 APAGAR",
                 callback_data="apagar"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "📊 ESTADO",
-                callback_data="estado"
             )
         ]
     ]
@@ -73,283 +54,173 @@ def teclado_principal():
 
 
 # =========================================================
-# /START
+# BOTÓN
 # =========================================================
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def botones(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
 
-    await update.message.reply_text(
-        "🥇 XAU SNIPER AI V3.3\n\n"
-        "🤖 Panel de control\n\n"
-        "⏱️ Intervalo: 100 segundos\n"
-        "🟡 Advertencias anticipadas: ACTIVAS\n"
-        "📈 EMA20 no bloquea la advertencia anticipada\n\n"
-        "Selecciona una opción:",
-        reply_markup=teclado_principal()
-    )
-
-
-# =========================================================
-# ESTADO
-# =========================================================
-
-async def mostrar_estado(query):
-
-    if bot_activo:
-
-        texto = (
-            "🟢 BOT ACTIVO\n\n"
-            "🔍 Analizando XAU/USD\n"
-            "⏱️ Cada 100 segundos\n"
-            "🟡 Advertencias anticipadas: ACTIVAS"
-        )
-
-    else:
-
-        texto = (
-            "🔴 BOT APAGADO\n\n"
-            "El escáner está detenido.\n"
-            "Pulsa ▶️ ENCENDER para comenzar."
-        )
-
-    await query.answer()
-
-    await query.message.reply_text(
-        texto,
-        reply_markup=teclado_principal()
-    )
-
-
-# =========================================================
-# ENCENDER
-# =========================================================
-
-async def encender(app, query):
-
-    global bot_activo
-    global tarea_analisis
-
-    if bot_activo:
-
-        await query.answer(
-            "⚠️ El bot ya está encendido."
-        )
-
-        return
-
-    bot_activo = True
-
-    tarea_analisis = asyncio.create_task(
-        ciclo_analisis(app)
-    )
-
-    await query.answer(
-        "🟢 Bot encendido"
-    )
-
-    await query.message.reply_text(
-        "🟢 XAU SNIPER AI V3.3 ENCENDIDO\n\n"
-        "🔍 Comenzando análisis...\n"
-        "⏱️ Próximas revisiones cada 100 segundos.\n"
-        "🟡 Advertencias anticipadas activas.",
-        reply_markup=teclado_principal()
-    )
-
-
-# =========================================================
-# APAGAR
-# =========================================================
-
-async def apagar(query):
-
-    global bot_activo
-    global tarea_analisis
-
-    if not bot_activo:
-
-        await query.answer(
-            "⚠️ El bot ya está apagado."
-        )
-
-        return
-
-    bot_activo = False
-
-    if tarea_analisis:
-
-        tarea_analisis.cancel()
-        tarea_analisis = None
-
-    await query.answer(
-        "🔴 Bot apagado"
-    )
-
-    await query.message.reply_text(
-        "🔴 XAU SNIPER AI V3.3 APAGADO\n\n"
-        "El análisis automático está detenido.",
-        reply_markup=teclado_principal()
-    )
-
-
-# =========================================================
-# CALLBACKS
-# =========================================================
-
-async def botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global encendido
 
     query = update.callback_query
 
+    await query.answer()
+
     if query.data == "encender":
 
-        await encender(
-            context.application,
-            query
+        encendido = True
+
+        await query.edit_message_text(
+            "🟢 XAU SNIPER AI V3.3\n\n"
+            "Estado: ENCENDIDO 🟢\n\n"
+            "🔍 Analizando cada 100 segundos...",
+            reply_markup=teclado()
         )
+
+        print("🟢 BOT ENCENDIDO")
 
     elif query.data == "apagar":
 
-        await apagar(query)
+        encendido = False
 
-    elif query.data == "estado":
+        await query.edit_message_text(
+            "🔴 XAU SNIPER AI V3.3\n\n"
+            "Estado: APAGADO 🔴\n\n"
+            "Pulsa ENCENDER para continuar.",
+            reply_markup=teclado()
+        )
 
-        await mostrar_estado(query)
+        print("🔴 BOT APAGADO")
 
 
 # =========================================================
-# ANALIZAR
+# COMANDO /START
 # =========================================================
 
-async def analizar_mercado(app):
+async def start(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
+    await update.message.reply_text(
+        "🥇 XAU SNIPER AI V3.3\n\n"
+        "Control del escáner:",
+        reply_markup=teclado()
+    )
+
+
+# =========================================================
+# ANALIZADOR
+# =========================================================
+
+async def ciclo():
 
     global ultima_alerta
 
-    print("🔍 Analizando...")
-
-    try:
-
-        resultado = analizar()
-
-        tipo = resultado.get("tipo")
-        mensaje = resultado.get("mensaje")
-
-        print(f"📩 Tipo: {tipo}")
-
-        if tipo == "SIN_SEÑAL":
-
-            print("😴 Sin señal")
-            return
-
-        if tipo == "ERROR":
-
-            print(mensaje)
-
-            await app.bot.send_message(
-                chat_id=CHAT_ID,
-                text=mensaje
-            )
-
-            return
-
-        # =================================================
-        # EVITAR REPETIR LA MISMA ADVERTENCIA
-        # =================================================
-
-        clave = mensaje
-
-        if (
-            tipo.startswith("ADVERTENCIA")
-            and clave == ultima_alerta
-        ):
-
-            print("⚠️ Advertencia repetida ignorada")
-            return
-
-        # =================================================
-        # LAS SEÑALES CONFIRMADAS SIEMPRE PUEDEN AVISAR
-        # =================================================
-
-        if tipo in [
-            "COMPRA",
-            "VENTA"
-        ]:
-
-            ultima_alerta = None
-
-            await app.bot.send_message(
-                chat_id=CHAT_ID,
-                text=mensaje
-            )
-
-            print("📨 SEÑAL CONFIRMADA ENVIADA")
-
-            return
-
-        # =================================================
-        # ADVERTENCIA
-        # =================================================
-
-        ultima_alerta = clave
-
-        await app.bot.send_message(
-            chat_id=CHAT_ID,
-            text=mensaje
-        )
-
-        print("📨 ADVERTENCIA ENVIADA")
-
-    except Exception as e:
-
-        print(
-            f"❌ ERROR BOT: {e}"
-        )
+    while True:
 
         try:
 
-            await app.bot.send_message(
-                chat_id=CHAT_ID,
-                text=f"❌ Error XAU Sniper AI:\n{e}"
-            )
+            if encendido:
 
-        except Exception as telegram_error:
+                print("🔍 Analizando...")
+
+                resultado = analizar()
+
+                tipo = resultado.get(
+                    "tipo",
+                    "SIN_SEÑAL"
+                )
+
+                mensaje = resultado.get(
+                    "mensaje",
+                    "😴 Sin señal"
+                )
+
+                print(
+                    f"📩 Tipo: {tipo}"
+                )
+
+                print(mensaje)
+
+                # =========================================
+                # EVITAR REPETICIONES
+                # =========================================
+
+                if tipo != "SIN_SEÑAL":
+
+                    clave = (
+                        tipo,
+                        mensaje
+                    )
+
+                    if clave != ultima_alerta:
+
+                        ultima_alerta = clave
+
+                        await enviar_alerta(
+                            mensaje
+                        )
+
+                    else:
+
+                        print(
+                            "⏭️ Alerta repetida, no se envía."
+                        )
+
+                else:
+
+                    print(
+                        "😴 Sin señal"
+                    )
+
+            else:
+
+                print(
+                    "⏸️ Bot apagado..."
+                )
+
+        except Exception as e:
 
             print(
-                f"❌ Error enviando Telegram: {telegram_error}"
+                f"❌ ERROR EN CICLO: {e}"
             )
 
+        print(
+            f"⏳ Esperando {INTERVALO} segundos..."
+        )
+
+        await asyncio.sleep(
+            INTERVALO
+        )
+
 
 # =========================================================
-# CICLO
+# ENVIAR ALERTA
 # =========================================================
 
-async def ciclo_analisis(app):
-
-    print("🚀 CICLO DE ANÁLISIS INICIADO")
+async def enviar_alerta(mensaje):
 
     try:
 
-        while bot_activo:
+        chat_id = int(CHAT_ID)
 
-            await analizar_mercado(app)
-
-            if not bot_activo:
-                break
-
-            print(
-                "⏳ Esperando 100 segundos..."
-            )
-
-            await asyncio.sleep(INTERVALO)
-
-    except asyncio.CancelledError:
+        await application.bot.send_message(
+            chat_id=chat_id,
+            text=mensaje,
+            reply_markup=teclado()
+        )
 
         print(
-            "⏹️ CICLO DE ANÁLISIS DETENIDO"
+            "📩 Alerta enviada a Telegram"
         )
 
     except Exception as e:
 
         print(
-            f"❌ ERROR CICLO: {e}"
+            f"❌ ERROR TELEGRAM: {e}"
         )
 
 
@@ -357,37 +228,58 @@ async def ciclo_analisis(app):
 # INICIO
 # =========================================================
 
-async def inicio(app):
+async def inicio():
 
-    print("===================================")
-    print("🔥 XAU SNIPER AI V3.3")
-    print("🚀 BOT.PY CARGADO")
-    print("===================================")
+    global application
 
-    await app.bot.send_message(
-        chat_id=CHAT_ID,
+    print(
+        "==================================="
+    )
+
+    print(
+        "🔥 BOT.PY V3.3 CARGADO"
+    )
+
+    print(
+        "🚀 XAU SNIPER AI V3.3 ACTIVO"
+    )
+
+    print(
+        "⏱️ Intervalo: 100 segundos"
+    )
+
+    print(
+        "==================================="
+    )
+
+    await application.bot.send_message(
+        chat_id=int(CHAT_ID),
         text=(
-            "🚀 XAU Sniper AI V3.3 iniciado correctamente.\n\n"
+            "🚀 XAU Sniper AI V3.3 "
+            "iniciado correctamente.\n\n"
             "✅ Conexión Telegram: OK\n"
             "✅ Motor de análisis: OK\n"
             "📊 Mercado: XAU/USD\n"
-            "⏱️ Intervalo: 100 segundos\n\n"
-            "🔴 El escáner está APAGADO.\n"
-            "Pulsa ▶️ ENCENDER para comenzar."
+            "⏱ Revisión: cada 100 segundos"
         ),
-        reply_markup=teclado_principal()
+        reply_markup=teclado()
     )
 
-    print("✅ Panel enviado a Telegram")
+    asyncio.create_task(
+        ciclo()
+    )
 
 
 # =========================================================
 # MAIN
 # =========================================================
 
+application = None
+
+
 def main():
 
-    print("🟡 INICIANDO BOT.PY...")
+    global application
 
     application = (
         Application.builder()
@@ -397,24 +289,24 @@ def main():
     )
 
     application.add_handler(
-        CommandHandler("start", start)
+        CommandHandler(
+            "start",
+            start
+        )
     )
 
     application.add_handler(
-        CallbackQueryHandler(botones)
+        CallbackQueryHandler(
+            botones
+        )
     )
 
-    print("✅ Aplicación Telegram preparada")
-    print("🚀 Iniciando polling...")
-
-    application.run_polling(
-        drop_pending_updates=True
+    print(
+        "🚀 Iniciando XAU SNIPER AI V3.3..."
     )
 
+    application.run_polling()
 
-# =========================================================
-# EJECUTAR
-# =========================================================
 
 if __name__ == "__main__":
     main()
