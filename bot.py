@@ -11,7 +11,7 @@ import json
 from datetime import datetime
 
 from strategy import analizar
-print("🔥 BOT.PY V3.2 CARGADO")
+print("🔥 BOT.PY V3.3 CARGADO")
 
 
 TOKEN = os.getenv("BOT_TOKEN")
@@ -250,15 +250,16 @@ async def inicio(app):
 
     await app.bot.send_message(
         chat_id=CHAT_ID,
-        text="""🚀 XAU Sniper AI V3.2 iniciado correctamente.
+        text="""🚀 XAU Sniper AI V3.3 iniciado correctamente.
 
 ✅ Conexión Telegram: OK
-✅ Estrategia V3.2 cargada
+✅ Estrategia V3.3 cargada
 📊 Mercado: XAU/USD
-🧠 Historial activado
+🧠 Escáner anticipatorio activado
+📚 Historial activado
 
 🔴 Análisis actualmente APAGADO
-💰 Twelve Data no está consumiendo créditos.""",
+💰 Twelve Data no está consumiendo créditos."""
         reply_markup=InlineKeyboardMarkup(teclado)
     )
 
@@ -282,7 +283,7 @@ async def main():
         analizar_loop(app)
     )
 
-    print("✅ XAU SNIPER V3.2 ACTIVO")
+    print("✅ XAU SNIPER V3.3 ACTIVO")
 
     while True:
         await asyncio.sleep(3600)
