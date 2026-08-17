@@ -704,18 +704,15 @@ def analizar():
             score_compra >= 80
             and score_compra > score_venta
             and contexto_alcista_15
-            and precio > ema50
+            and estructura_alcista
             and momentum_alcista
-            and fuerza_compradora
         )
 
         posible_venta = (
             score_venta >= 80
             and score_venta > score_compra
             and contexto_bajista_15
-            and precio < ema50
             and momentum_bajista
-            and fuerza_vendedora
         )
 
         # =================================================
