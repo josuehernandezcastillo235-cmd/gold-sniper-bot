@@ -26,7 +26,7 @@ INTERVALO = 100
 # ESTADO
 # =========================================================
 
-bot_encendido = True
+bot_encendido = False
 ultima_senal = None
 
 
@@ -70,7 +70,7 @@ async def inicio(application):
 
     global bot_encendido
 
-    bot_encendido = True
+    bot_encendido = False
 
     print("🚀 XAU SNIPER AI V3.3 iniciado correctamente")
 
