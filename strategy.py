@@ -1,7 +1,7 @@
-import requests
-import pandas as pd
 import os
 import uuid
+import requests
+import pandas as pd
 
 from ta.trend import EMAIndicator, ADXIndicator
 from ta.momentum import RSIIndicator
@@ -13,7 +13,6 @@ from ta.volatility import AverageTrueRange
 # =========================================================
 
 API_KEY = os.getenv("API_KEY")
-
 SYMBOL = "XAU/USD"
 
 
@@ -56,8 +55,6 @@ def obtener_datos(intervalo):
     if df.empty:
         return df
 
-    # Twelve Data entrega las velas de más reciente
-    # a más antigua. Las invertimos.
     df = df.iloc[::-1].reset_index(
         drop=True
     )
@@ -99,10 +96,6 @@ def calcular_indicadores(df):
 
     df = df.copy()
 
-    # -----------------------------------------------------
-    # EMA
-    # -----------------------------------------------------
-
     df["EMA20"] = EMAIndicator(
         close=df["close"],
         window=20
@@ -118,18 +111,10 @@ def calcular_indicadores(df):
         window=200
     ).ema_indicator()
 
-    # -----------------------------------------------------
-    # RSI
-    # -----------------------------------------------------
-
     df["RSI"] = RSIIndicator(
         close=df["close"],
         window=14
     ).rsi()
-
-    # -----------------------------------------------------
-    # ATR
-    # -----------------------------------------------------
 
     df["ATR"] = AverageTrueRange(
         high=df["high"],
@@ -137,10 +122,6 @@ def calcular_indicadores(df):
         close=df["close"],
         window=14
     ).average_true_range()
-
-    # -----------------------------------------------------
-    # ADX / DI
-    # -----------------------------------------------------
 
     adx = ADXIndicator(
         high=df["high"],
@@ -150,9 +131,7 @@ def calcular_indicadores(df):
     )
 
     df["ADX"] = adx.adx()
-
     df["DI_PLUS"] = adx.adx_pos()
-
     df["DI_MINUS"] = adx.adx_neg()
 
     return df
@@ -169,15 +148,13 @@ def tendencia(df):
 
     vela = df.iloc[-1]
 
-    valores = [
-        vela["EMA20"],
-        vela["EMA50"],
-        vela["EMA200"]
-    ]
-
     if any(
-        pd.isna(x)
-        for x in valores
+        pd.isna(vela[x])
+        for x in [
+            "EMA20",
+            "EMA50",
+            "EMA200"
+        ]
     ):
 
         return "LATERAL"
@@ -214,44 +191,31 @@ def analizar():
         # =================================================
 
         df5 = obtener_datos("5min")
-
         df15 = obtener_datos("15min")
 
         print(
             "✅ Datos 5M y 15M recibidos"
         )
 
-        if (
-            df5.empty
-            or df15.empty
-        ):
+        if df5.empty or df15.empty:
 
             return {
                 "tipo": "SIN_SEÑAL",
                 "mensaje": "😴 Sin señal"
             }
 
-
         # =================================================
         # INDICADORES
         # =================================================
 
-        df5 = calcular_indicadores(
-            df5
-        )
-
-        df15 = calcular_indicadores(
-            df15
-        )
+        df5 = calcular_indicadores(df5)
+        df15 = calcular_indicadores(df15)
 
         print(
             "✅ Indicadores calculados"
         )
 
-        if (
-            len(df5) < 220
-            or len(df15) < 220
-        ):
+        if len(df5) < 220 or len(df15) < 220:
 
             print(
                 "⚠️ Historial insuficiente"
@@ -262,19 +226,15 @@ def analizar():
                 "mensaje": "😴 Historial insuficiente"
             }
 
-
         # =================================================
         # VELAS
         # =================================================
 
         vela = df5.iloc[-1]
-
         anterior = df5.iloc[-2]
-
         anterior2 = df5.iloc[-3]
 
         vela15 = df15.iloc[-1]
-
 
         # =================================================
         # PRECIO
@@ -287,7 +247,6 @@ def analizar():
         apertura = float(
             vela["open"]
         )
-
 
         # =================================================
         # EMA
@@ -312,7 +271,6 @@ def analizar():
         ema20_ant2 = float(
             anterior2["EMA20"]
         )
-
 
         # =================================================
         # INDICADORES
@@ -346,11 +304,6 @@ def analizar():
             vela["ATR"]
         )
 
-
-        # =================================================
-        # VALIDACIÓN
-        # =================================================
-
         valores = [
             precio,
             ema20,
@@ -382,19 +335,12 @@ def analizar():
                 "mensaje": "😴 ATR inválido"
             }
 
-
         # =================================================
         # TENDENCIAS
         # =================================================
 
-        tendencia5 = tendencia(
-            df5
-        )
-
-        tendencia15 = tendencia(
-            df15
-        )
-
+        tendencia5 = tendencia(df5)
+        tendencia15 = tendencia(df15)
 
         # =================================================
         # EMA
@@ -418,9 +364,8 @@ def analizar():
             and ema20_ant < ema20_ant2
         )
 
-
         # =================================================
-        # ESTRUCTURA
+        # ESTRUCTURA DE PRECIO
         # =================================================
 
         maximos_recientes = df5[
@@ -440,13 +385,13 @@ def analizar():
         )
 
         cerca_maximo = (
-            precio
-            >= maximo_reciente - atr * 0.5
+            precio >=
+            maximo_reciente - atr * 0.5
         )
 
         cerca_minimo = (
-            precio
-            <= minimo_reciente + atr * 0.5
+            precio <=
+            minimo_reciente + atr * 0.5
         )
 
         ruptura_alcista = (
@@ -457,9 +402,8 @@ def analizar():
             precio < minimo_reciente
         )
 
-
         # =================================================
-        # DISTANCIA EMA
+        # DISTANCIA EMA20
         # =================================================
 
         distancia_ema = abs(
@@ -474,7 +418,6 @@ def analizar():
             distancia_ema > atr * 2.0
         )
 
-
         # =================================================
         # VELA
         # =================================================
@@ -486,7 +429,6 @@ def analizar():
         vela_bajista = (
             precio < apertura
         )
-
 
         # =================================================
         # RSI
@@ -512,7 +454,6 @@ def analizar():
             and rsi_bajando
         )
 
-
         # =================================================
         # ADX
         # =================================================
@@ -524,7 +465,6 @@ def analizar():
         adx_creciendo = (
             adx > adx_anterior
         )
-
 
         # =================================================
         # DI
@@ -538,9 +478,8 @@ def analizar():
             di_minus > di_plus
         )
 
-
         # =================================================
-        # ESTRUCTURA
+        # ESTRUCTURA EMA PARA CONFIRMACIÓN
         # =================================================
 
         estructura_alcista = (
@@ -552,7 +491,6 @@ def analizar():
             precio < ema50
             and ema20 <= ema50
         )
-
 
         # =================================================
         # CONTEXTO 15M
@@ -576,101 +514,104 @@ def analizar():
             )
         )
 
-
         # =================================================
-        # SCORE BASE
-        #
-        # IMPORTANTE:
-        # EMA20 y ADX NO SON NECESARIOS PARA LA
-        # ADVERTENCIA ANTICIPADA.
+        # SCORE
         # =================================================
 
         score_compra = 0
+        score_venta = 0
+
+        # -------------------------------------------------
+        # COMPRA
+        # -------------------------------------------------
 
         if tendencia5 == "ALCISTA":
-            score_compra += 25
+            score_compra += 20
 
         elif tendencia5 == "LATERAL":
             score_compra += 8
 
         if contexto_alcista_15:
-            score_compra += 20
+            score_compra += 15
 
-        if estructura_alcista:
-            score_compra += 20
+        if precio > ema50:
+            score_compra += 15
+
+        if ema20_subiendo:
+            score_compra += 10
+
+        if ema20_acelerando_alza:
+            score_compra += 5
 
         if momentum_alcista:
-            score_compra += 15
+            score_compra += 10
+
+        if adx_fuerte:
+            score_compra += 8
+
+        if adx_creciendo:
+            score_compra += 5
 
         if fuerza_compradora:
             score_compra += 10
+
+        if cerca_ema:
+            score_compra += 5
 
         if cerca_maximo:
             score_compra += 5
 
         if ruptura_alcista:
-            score_compra += 5
+            score_compra += 8
 
+        if vela_alcista:
+            score_compra += 3
 
-        score_venta = 0
+        # -------------------------------------------------
+        # VENTA
+        # -------------------------------------------------
 
         if tendencia5 == "BAJISTA":
-            score_venta += 25
+            score_venta += 20
 
         elif tendencia5 == "LATERAL":
             score_venta += 8
 
         if contexto_bajista_15:
-            score_venta += 20
+            score_venta += 15
 
-        if estructura_bajista:
-            score_venta += 20
+        if precio < ema50:
+            score_venta += 15
+
+        if ema20_bajando:
+            score_venta += 10
+
+        if ema20_acelerando_baja:
+            score_venta += 5
 
         if momentum_bajista:
-            score_venta += 15
+            score_venta += 10
+
+        if adx_fuerte:
+            score_venta += 8
+
+        if adx_creciendo:
+            score_venta += 5
 
         if fuerza_vendedora:
             score_venta += 10
+
+        if cerca_ema:
+            score_venta += 5
 
         if cerca_minimo:
             score_venta += 5
 
         if ruptura_bajista:
-            score_venta += 5
+            score_venta += 8
 
-
-        # =================================================
-        # PUNTOS DE CONFIRMACIÓN
-        #
-        # Estos NO forman parte del requisito de
-        # advertencia anticipada.
-        # =================================================
-
-        if ema20_subiendo:
-            score_compra += 5
-
-        if ema20_acelerando_alza:
-            score_compra += 3
-
-        if adx_fuerte:
-            score_compra += 5
-
-        if adx_creciendo:
-            score_compra += 2
-
-
-        if ema20_bajando:
-            score_venta += 5
-
-        if ema20_acelerando_baja:
+        if vela_bajista:
             score_venta += 3
-
-        if adx_fuerte:
-            score_venta += 5
-
-        if adx_creciendo:
-            score_venta += 2
-
 
         score_compra = min(
             score_compra,
@@ -681,7 +622,6 @@ def analizar():
             score_venta,
             100
         )
-
 
         # =================================================
         # DIAGNÓSTICO
@@ -728,15 +668,6 @@ def analizar():
             f"⭐ SCORE VENTA={score_venta}"
         )
 
-        print(
-            f"📈 EMA20 subiendo={ema20_subiendo}"
-        )
-
-        print(
-            f"📊 ADX fuerte={adx_fuerte}"
-        )
-
-
         # =================================================
         # FILTRO DE EXTENSIÓN
         # =================================================
@@ -755,51 +686,40 @@ def analizar():
                 )
             }
 
-
         # =================================================
-        # POSIBLE COMPRA ANTICIPADA
+        # 🟡 ADVERTENCIA ANTICIPADA
         #
-        # NO exige:
+        # IMPORTANTE:
+        #
+        # La advertencia NO necesita:
+        #
         # ❌ EMA20 subiendo
         # ❌ ADX >= 20
         #
-        # Sí necesita:
-        # ✅ Contexto 15M
-        # ✅ Estructura
-        # ✅ Momentum RSI
-        # ✅ DI+
+        # La EMA20 solamente queda como
+        # información y para confirmación.
         # =================================================
 
         posible_compra = (
             score_compra >= 80
             and score_compra > score_venta
             and contexto_alcista_15
-            and estructura_alcista
+            and precio > ema50
             and momentum_alcista
             and fuerza_compradora
         )
-
-
-        # =================================================
-        # POSIBLE VENTA ANTICIPADA
-        # =================================================
 
         posible_venta = (
             score_venta >= 80
             and score_venta > score_compra
             and contexto_bajista_15
-            and estructura_bajista
+            and precio < ema50
             and momentum_bajista
             and fuerza_vendedora
         )
 
-
         # =================================================
-        # COMPRA CONFIRMADA
-        #
-        # Aquí SÍ exigimos:
-        # ✅ EMA20 subiendo
-        # ✅ ADX >= 20
+        # CONFIRMACIÓN
         # =================================================
 
         compra_confirmada = (
@@ -808,20 +728,14 @@ def analizar():
             and adx_fuerte
         )
 
-
-        # =================================================
-        # VENTA CONFIRMADA
-        # =================================================
-
         venta_confirmada = (
             posible_venta
             and ema20_bajando
             and adx_fuerte
         )
 
-
         # =================================================
-        # COMPRA CONFIRMADA
+        # 🟢 COMPRA CONFIRMADA
         # =================================================
 
         if compra_confirmada:
@@ -841,15 +755,14 @@ def analizar():
                 2
             )
 
-            identificador = (
-                uuid.uuid4().hex[:6]
-            )
+            identificador = uuid.uuid4().hex[:6]
 
             print(
                 "🟢 COMPRA CONFIRMADA"
             )
 
-            mensaje = f"""🥇 XAU SNIPER AI V3.3
+            mensaje = f"""
+🥇 XAU SNIPER AI V3.3
 
 ID: {identificador}
 
@@ -885,17 +798,15 @@ EMA200: {ema200:.2f}
 ✅ EMA20 confirmada
 ✅ ADX fuerte
 🧠 Momentum alcista
-"""
+""".strip()
 
             return {
                 "tipo": "COMPRA",
-                "mensaje": mensaje,
-                "precio": entrada
+                "mensaje": mensaje
             }
 
-
         # =================================================
-        # VENTA CONFIRMADA
+        # 🔴 VENTA CONFIRMADA
         # =================================================
 
         if venta_confirmada:
@@ -915,15 +826,14 @@ EMA200: {ema200:.2f}
                 2
             )
 
-            identificador = (
-                uuid.uuid4().hex[:6]
-            )
+            identificador = uuid.uuid4().hex[:6]
 
             print(
                 "🔴 VENTA CONFIRMADA"
             )
 
-            mensaje = f"""🥇 XAU SNIPER AI V3.3
+            mensaje = f"""
+🥇 XAU SNIPER AI V3.3
 
 ID: {identificador}
 
@@ -959,17 +869,15 @@ EMA200: {ema200:.2f}
 ✅ EMA20 confirmada
 ✅ ADX fuerte
 🧠 Momentum bajista
-"""
+""".strip()
 
             return {
                 "tipo": "VENTA",
-                "mensaje": mensaje,
-                "precio": entrada
+                "mensaje": mensaje
             }
 
-
         # =================================================
-        # POSIBLE COMPRA ANTICIPADA
+        # 🟡 POSIBLE COMPRA
         # =================================================
 
         if posible_compra:
@@ -989,12 +897,155 @@ EMA200: {ema200:.2f}
                 2
             )
 
-            identificador = (
-                uuid.uuid4().hex[:6]
-            )
+            identificador = uuid.uuid4().hex[:6]
 
             print(
                 "🟡 POSIBLE COMPRA ANTICIPADA"
             )
 
-            mensaje = f"""🥇 X
+            mensaje = f"""
+🥇 XAU SNIPER AI V3.3
+
+ID: {identificador}
+
+🟡 POSIBLE COMPRA ANTICIPADA
+
+⚠️ AÚN SIN CONFIRMACIÓN
+
+⭐ Score: {score_compra}/100
+
+📊 Tendencia:
+5M: {tendencia5}
+15M: {tendencia15}
+
+📋 REFERENCIA
+
+Precio: {entrada:.2f}
+
+🛑 SL referencia:
+{sl:.2f}
+
+🎯 TP referencia:
+{tp:.2f}
+
+📈 RSI: {rsi:.1f}
+📊 ADX: {adx:.1f}
+
+DI+: {di_plus:.1f}
+DI-: {di_minus:.1f}
+
+EMA20: {ema20:.2f}
+EMA50: {ema50:.2f}
+
+🧠 Momentum alcista
+📈 Precio sobre EMA50
+⚠️ EMA20 aún NO es requisito
+⚠️ Esperando confirmación
+""".strip()
+
+            return {
+                "tipo": "POSIBLE_COMPRA",
+                "mensaje": mensaje
+            }
+
+        # =================================================
+        # 🟡 POSIBLE VENTA
+        # =================================================
+
+        if posible_venta:
+
+            entrada = round(
+                precio,
+                2
+            )
+
+            sl = round(
+                entrada + atr * 1.3,
+                2
+            )
+
+            tp = round(
+                entrada - atr * 2.2,
+                2
+            )
+
+            identificador = uuid.uuid4().hex[:6]
+
+            print(
+                "🟡 POSIBLE VENTA ANTICIPADA"
+            )
+
+            mensaje = f"""
+🥇 XAU SNIPER AI V3.3
+
+ID: {identificador}
+
+🟡 POSIBLE VENTA ANTICIPADA
+
+⚠️ AÚN SIN CONFIRMACIÓN
+
+⭐ Score: {score_venta}/100
+
+📊 Tendencia:
+5M: {tendencia5}
+15M: {tendencia15}
+
+📋 REFERENCIA
+
+Precio: {entrada:.2f}
+
+🛑 SL referencia:
+{sl:.2f}
+
+🎯 TP referencia:
+{tp:.2f}
+
+📈 RSI: {rsi:.1f}
+📊 ADX: {adx:.1f}
+
+DI+: {di_plus:.1f}
+DI-: {di_minus:.1f}
+
+EMA20: {ema20:.2f}
+EMA50: {ema50:.2f}
+
+🧠 Momentum bajista
+📉 Precio bajo EMA50
+⚠️ EMA20 aún NO es requisito
+⚠️ Esperando confirmación
+""".strip()
+
+            return {
+                "tipo": "POSIBLE_VENTA",
+                "mensaje": mensaje
+            }
+
+        # =================================================
+        # SIN SEÑAL
+        # =================================================
+
+        print(
+            "😴 Sin señal"
+        )
+
+        return {
+            "tipo": "SIN_SEÑAL",
+            "mensaje": "😴 Sin señal"
+        }
+
+    # =====================================================
+    # ERROR
+    # =====================================================
+
+    except Exception as e:
+
+        print(
+            f"❌ ERROR STRATEGY V3.3: {e}"
+        )
+
+        return {
+            "tipo": "ERROR",
+            "mensaje": (
+                f"❌ Error estrategia: {e}"
+            )
+        }
