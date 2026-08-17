@@ -11,40 +11,38 @@ from ta.volatility import AverageTrueRange
 
 # ============================================================
 # XAU SNIPER AI V3.4
-# PREALERTA + CONFIRMACIÓN + CONTROL DE REPETICIONES
 # ============================================================
 
 API_KEY = os.getenv("API_KEY")
 
 SYMBOL = "XAU/USD"
 
-# ------------------------------------------------------------
-# CONFIGURACIÓN
-# ------------------------------------------------------------
-
 INTERVALO_5M = "5min"
 INTERVALO_15M = "15min"
 
+# Tiempo mínimo entre nuevas prealertas
 MINUTOS_REPETICION = 15
 
+# Confirmación
 ADX_MINIMO_CONFIRMACION = 15
 
 RSI_COMPRA_MIN = 55
 RSI_VENTA_MAX = 45
 
+# SL / TP
 ATR_SL = 1.3
 ATR_TP = 2.2
 
 
 # ============================================================
-# ESTADO DE LA ESTRATEGIA
+# ESTADO
 # ============================================================
 
 estado = {
     "direccion_pendiente": None,
     "id_pendiente": None,
     "ultima_prealerta": 0,
-    "ultima_confirmacion": 0,
+    "ultima_confirmacion": 0
 }
 
 
@@ -62,7 +60,7 @@ def obtener_datos(intervalo):
     params = {
         "symbol": SYMBOL,
         "interval": intervalo,
-        "outputsize": 200,
+        "outputsize": 5000,
         "apikey": API_KEY,
         "format": "JSON"
     }
@@ -78,6 +76,7 @@ def obtener_datos(intervalo):
     data = respuesta.json()
 
     if "values" not in data:
+
         raise Exception(
             f"Error Twelve Data: {data}"
         )
@@ -86,21 +85,19 @@ def obtener_datos(intervalo):
 
     if df.empty:
         raise Exception(
-            f"Sin datos para {intervalo}"
+            f"Datos vacíos para {intervalo}"
         )
 
     # --------------------------------------------------------
-    # Convertir columnas
+    # Convertir precios
     # --------------------------------------------------------
 
-    columnas = [
+    for columna in [
         "open",
         "high",
         "low",
         "close"
-    ]
-
-    for columna in columnas:
+    ]:
 
         df[columna] = pd.to_numeric(
             df[columna],
@@ -121,12 +118,18 @@ def obtener_datos(intervalo):
         ]
     )
 
+    # Orden cronológico
     df = df.sort_values(
         "datetime"
     )
 
     df = df.reset_index(
         drop=True
+    )
+
+    print(
+        f"📥 {intervalo}: "
+        f"{len(df)} velas recibidas"
     )
 
     return df
@@ -138,38 +141,31 @@ def obtener_datos(intervalo):
 
 def calcular_indicadores(df):
 
-    # --------------------------------------------------------
-    # EMA
-    # --------------------------------------------------------
-
+    # EMA 20
     df["ema20"] = EMAIndicator(
         close=df["close"],
         window=20
     ).ema_indicator()
 
+    # EMA 50
     df["ema50"] = EMAIndicator(
         close=df["close"],
         window=50
     ).ema_indicator()
 
+    # EMA 200
     df["ema200"] = EMAIndicator(
         close=df["close"],
         window=200
     ).ema_indicator()
 
-    # --------------------------------------------------------
     # RSI
-    # --------------------------------------------------------
-
     df["rsi"] = RSIIndicator(
         close=df["close"],
         window=14
     ).rsi()
 
-    # --------------------------------------------------------
     # ATR
-    # --------------------------------------------------------
-
     df["atr"] = AverageTrueRange(
         high=df["high"],
         low=df["low"],
@@ -177,10 +173,7 @@ def calcular_indicadores(df):
         window=14
     ).average_true_range()
 
-    # --------------------------------------------------------
     # ADX
-    # --------------------------------------------------------
-
     adx = ADXIndicator(
         high=df["high"],
         low=df["low"],
@@ -192,7 +185,15 @@ def calcular_indicadores(df):
     df["di_plus"] = adx.adx_pos()
     df["di_minus"] = adx.adx_neg()
 
-    df = df.dropna()
+    # Eliminar filas incompletas
+    df = df.dropna().reset_index(
+        drop=True
+    )
+
+    print(
+        f"📊 Velas útiles después de indicadores: "
+        f"{len(df)}"
+    )
 
     return df
 
@@ -203,17 +204,23 @@ def calcular_indicadores(df):
 
 def obtener_tendencia(row):
 
+    # ALCISTA
     if (
         row["ema20"] > row["ema50"]
-        and row["ema50"] > row["ema200"]
-        and row["close"] > row["ema20"]
+        and
+        row["ema50"] > row["ema200"]
+        and
+        row["close"] > row["ema20"]
     ):
         return "ALCISTA"
 
+    # BAJISTA
     if (
         row["ema20"] < row["ema50"]
-        and row["ema50"] < row["ema200"]
-        and row["close"] < row["ema20"]
+        and
+        row["ema50"] < row["ema200"]
+        and
+        row["close"] < row["ema20"]
     ):
         return "BAJISTA"
 
@@ -238,38 +245,28 @@ def calcular_score_compra(
 
     score = 0
 
-    # Tendencia 5M
     if tendencia5 == "ALCISTA":
         score += 25
 
-    # Tendencia 15M
     if tendencia15 == "ALCISTA":
         score += 25
 
-    # Precio sobre EMA50
     if precio > ema50:
         score += 15
 
-    # EMA20 sobre EMA50
     if ema20 > ema50:
         score += 15
 
-    # Momentum
     if rsi >= 55:
         score += 10
 
-    # DI
     if di_plus > di_minus:
         score += 5
 
-    # ADX
     if adx >= ADX_MINIMO_CONFIRMACION:
         score += 5
 
-    return min(
-        score,
-        100
-    )
+    return min(score, 100)
 
 
 # ============================================================
@@ -311,14 +308,11 @@ def calcular_score_venta(
     if adx >= ADX_MINIMO_CONFIRMACION:
         score += 5
 
-    return min(
-        score,
-        100
-    )
+    return min(score, 100)
 
 
 # ============================================================
-# PREALERTA COMPRA
+# POSIBLE COMPRA
 # ============================================================
 
 def es_posible_compra(
@@ -345,7 +339,7 @@ def es_posible_compra(
 
 
 # ============================================================
-# PREALERTA VENTA
+# POSIBLE VENTA
 # ============================================================
 
 def es_posible_venta(
@@ -372,7 +366,7 @@ def es_posible_venta(
 
 
 # ============================================================
-# CONFIRMACIÓN COMPRA
+# COMPRA CONFIRMADA
 # ============================================================
 
 def compra_confirmada(
@@ -405,7 +399,7 @@ def compra_confirmada(
 
 
 # ============================================================
-# CONFIRMACIÓN VENTA
+# VENTA CONFIRMADA
 # ============================================================
 
 def venta_confirmada(
@@ -438,7 +432,7 @@ def venta_confirmada(
 
 
 # ============================================================
-# INVALIDACIÓN DE COMPRA
+# INVALIDAR COMPRA
 # ============================================================
 
 def compra_invalida(
@@ -458,7 +452,7 @@ def compra_invalida(
 
 
 # ============================================================
-# INVALIDACIÓN DE VENTA
+# INVALIDAR VENTA
 # ============================================================
 
 def venta_invalida(
@@ -478,10 +472,10 @@ def venta_invalida(
 
 
 # ============================================================
-# GENERAR PREALERTA COMPRA
+# CREAR PREALERTA COMPRA
 # ============================================================
 
-def generar_prealerta_compra(
+def crear_prealerta_compra(
     precio,
     atr,
     score,
@@ -495,10 +489,7 @@ def generar_prealerta_compra(
     ema50
 ):
 
-    entrada = round(
-        precio,
-        2
-    )
+    entrada = round(precio, 2)
 
     sl = round(
         entrada - atr * ATR_SL,
@@ -561,10 +552,10 @@ EMA50: {ema50:.2f}
 
 
 # ============================================================
-# GENERAR PREALERTA VENTA
+# CREAR PREALERTA VENTA
 # ============================================================
 
-def generar_prealerta_venta(
+def crear_prealerta_venta(
     precio,
     atr,
     score,
@@ -578,10 +569,7 @@ def generar_prealerta_venta(
     ema50
 ):
 
-    entrada = round(
-        precio,
-        2
-    )
+    entrada = round(precio, 2)
 
     sl = round(
         entrada + atr * ATR_SL,
@@ -644,10 +632,10 @@ EMA50: {ema50:.2f}
 
 
 # ============================================================
-# GENERAR COMPRA CONFIRMADA
+# CREAR COMPRA CONFIRMADA
 # ============================================================
 
-def generar_compra_confirmada(
+def crear_compra_confirmada(
     precio,
     atr,
     score,
@@ -661,10 +649,7 @@ def generar_compra_confirmada(
     ema50
 ):
 
-    entrada = round(
-        precio,
-        2
-    )
+    entrada = round(precio, 2)
 
     sl = round(
         entrada - atr * ATR_SL,
@@ -676,10 +661,11 @@ def generar_compra_confirmada(
         2
     )
 
-    identificador = estado["id_pendiente"]
-
-    if identificador is None:
-        identificador = uuid.uuid4().hex[:6]
+    identificador = (
+        estado["id_pendiente"]
+        or
+        uuid.uuid4().hex[:6]
+    )
 
     mensaje = f"""
 🥇 XAU SNIPER AI V3.4
@@ -728,10 +714,10 @@ EMA50: {ema50:.2f}
 
 
 # ============================================================
-# GENERAR VENTA CONFIRMADA
+# CREAR VENTA CONFIRMADA
 # ============================================================
 
-def generar_venta_confirmada(
+def crear_venta_confirmada(
     precio,
     atr,
     score,
@@ -745,10 +731,7 @@ def generar_venta_confirmada(
     ema50
 ):
 
-    entrada = round(
-        precio,
-        2
-    )
+    entrada = round(precio, 2)
 
     sl = round(
         entrada + atr * ATR_SL,
@@ -760,10 +743,11 @@ def generar_venta_confirmada(
         2
     )
 
-    identificador = estado["id_pendiente"]
-
-    if identificador is None:
-        identificador = uuid.uuid4().hex[:6]
+    identificador = (
+        estado["id_pendiente"]
+        or
+        uuid.uuid4().hex[:6]
+    )
 
     mensaje = f"""
 🥇 XAU SNIPER AI V3.4
@@ -820,12 +804,14 @@ def analizar():
     try:
 
         print("")
+        print("===================================")
+        print("🔍 Analizando...")
         print("🔍 Analizando XAU/USD...")
-        print("")
+        print("===================================")
 
-        # ====================================================
+        # ----------------------------------------------------
         # DATOS
-        # ====================================================
+        # ----------------------------------------------------
 
         df5 = obtener_datos(
             INTERVALO_5M
@@ -835,11 +821,13 @@ def analizar():
             INTERVALO_15M
         )
 
-        print("✅ Datos 5M y 15M recibidos")
+        print(
+            "✅ Datos 5M y 15M recibidos"
+        )
 
-        # ====================================================
+        # ----------------------------------------------------
         # INDICADORES
-        # ====================================================
+        # ----------------------------------------------------
 
         df5 = calcular_indicadores(
             df5
@@ -849,18 +837,40 @@ def analizar():
             df15
         )
 
-        if len(df5) < 5 or len(df15) < 5:
+        print(
+            f"📊 Filas útiles 5M: {len(df5)}"
+        )
+
+        print(
+            f"📊 Filas útiles 15M: {len(df15)}"
+        )
+
+        # ----------------------------------------------------
+        # COMPROBAR DATOS
+        # ----------------------------------------------------
+
+        if len(df5) < 2:
 
             raise Exception(
-                "No hay suficientes datos"
+                f"No hay suficientes datos 5M: {len(df5)}"
             )
 
-        # ====================================================
-        # ÚLTIMA VELA
-        # ====================================================
+        if len(df15) < 2:
+
+            raise Exception(
+                f"No hay suficientes datos 15M: {len(df15)}"
+            )
+
+        # ----------------------------------------------------
+        # ÚLTIMAS VELAS
+        # ----------------------------------------------------
 
         actual5 = df5.iloc[-1]
         actual15 = df15.iloc[-1]
+
+        # ----------------------------------------------------
+        # VALORES 5M
+        # ----------------------------------------------------
 
         precio = float(
             actual5["close"]
@@ -898,6 +908,10 @@ def analizar():
             actual5["di_minus"]
         )
 
+        # ----------------------------------------------------
+        # TENDENCIAS
+        # ----------------------------------------------------
+
         tendencia5 = obtener_tendencia(
             actual5
         )
@@ -906,24 +920,36 @@ def analizar():
             actual15
         )
 
+        # ----------------------------------------------------
+        # DEBUG
+        # ----------------------------------------------------
+
+        print("")
+        print("📊 DATOS ACTUALES")
+        print("-----------------------------------")
+
         print(
             f"💰 Precio: {precio:.2f}"
         )
 
         print(
-            f"📊 5M: {tendencia5}"
+            f"EMA20: {ema20:.2f}"
         )
 
         print(
-            f"📊 15M: {tendencia15}"
+            f"EMA50: {ema50:.2f}"
         )
 
         print(
-            f"RSI: {rsi:.1f}"
+            f"EMA200: {ema200:.2f}"
         )
 
         print(
-            f"ADX: {adx:.1f}"
+            f"📈 RSI: {rsi:.1f}"
+        )
+
+        print(
+            f"📊 ADX: {adx:.1f}"
         )
 
         print(
@@ -934,9 +960,17 @@ def analizar():
             f"DI-: {di_minus:.1f}"
         )
 
-        # ====================================================
+        print(
+            f"5M: {tendencia5}"
+        )
+
+        print(
+            f"15M: {tendencia15}"
+        )
+
+        # ----------------------------------------------------
         # CONDICIONES
-        # ====================================================
+        # ----------------------------------------------------
 
         posible_compra = es_posible_compra(
             tendencia5,
@@ -982,32 +1016,37 @@ def analizar():
             di_minus
         )
 
+        print("")
+        print("📋 CONDICIONES")
+        print("-----------------------------------")
+
+        print(
+            f"🟡 Posible compra: "
+            f"{posible_compra}"
+        )
+
+        print(
+            f"🟡 Posible venta: "
+            f"{posible_venta}"
+        )
+
+        print(
+            f"🟢 Compra confirmada: "
+            f"{confirmada_compra}"
+        )
+
+        print(
+            f"🔴 Venta confirmada: "
+            f"{confirmada_venta}"
+        )
+
         # ====================================================
-        # DEBUG
-        # ====================================================
-
-        print(
-            f"🟡 Posible compra: {posible_compra}"
-        )
-
-        print(
-            f"🟡 Posible venta: {posible_venta}"
-        )
-
-        print(
-            f"🟢 Compra confirmada: {confirmada_compra}"
-        )
-
-        print(
-            f"🔴 Venta confirmada: {confirmada_venta}"
-        )
-
-        # ====================================================
-        # 1. CONFIRMACIÓN DE COMPRA
+        # CONFIRMACIÓN COMPRA
         # ====================================================
 
         if (
-            estado["direccion_pendiente"] == "COMPRA"
+            estado["direccion_pendiente"]
+            == "COMPRA"
             and
             confirmada_compra
         ):
@@ -1024,7 +1063,7 @@ def analizar():
                 di_minus
             )
 
-            resultado = generar_compra_confirmada(
+            resultado = crear_compra_confirmada(
                 precio,
                 atr,
                 score,
@@ -1049,11 +1088,12 @@ def analizar():
             return resultado
 
         # ====================================================
-        # 2. CONFIRMACIÓN DE VENTA
+        # CONFIRMACIÓN VENTA
         # ====================================================
 
         if (
-            estado["direccion_pendiente"] == "VENTA"
+            estado["direccion_pendiente"]
+            == "VENTA"
             and
             confirmada_venta
         ):
@@ -1070,7 +1110,7 @@ def analizar():
                 di_minus
             )
 
-            resultado = generar_venta_confirmada(
+            resultado = crear_venta_confirmada(
                 precio,
                 atr,
                 score,
@@ -1095,10 +1135,13 @@ def analizar():
             return resultado
 
         # ====================================================
-        # 3. INVALIDAR COMPRA
+        # COMPRA PENDIENTE
         # ====================================================
 
-        if estado["direccion_pendiente"] == "COMPRA":
+        if (
+            estado["direccion_pendiente"]
+            == "COMPRA"
+        ):
 
             if compra_invalida(
                 tendencia5,
@@ -1108,7 +1151,7 @@ def analizar():
             ):
 
                 print(
-                    "🔴 PREALERTA COMPRA INVALIDADA"
+                    "🔴 PREALERTA COMPRA DESCARTADA"
                 )
 
                 estado["direccion_pendiente"] = None
@@ -1117,19 +1160,20 @@ def analizar():
                 return {
                     "tipo": "DESCARTADA",
                     "mensaje": (
-                        "🔴 PREALERTA COMPRA DESCARTADA\n"
-                        "Las condiciones alcistas "
-                        "dejaron de cumplirse."
+                        "🔴 PREALERTA COMPRA "
+                        "DESCARTADA\n\n"
+                        "Las condiciones "
+                        "alcistas dejaron de "
+                        "cumplirse."
                     )
                 }
 
-            # ------------------------------------------------
-            # Si sigue pendiente, NO mandar otra alerta
-            # ------------------------------------------------
+            print(
+                "🔎 COMPRA PENDIENTE"
+            )
 
             print(
-                "🔎 COMPRA PENDIENTE - "
-                "SIN NUEVA ALERTA"
+                "⏳ Esperando confirmación..."
             )
 
             return {
@@ -1138,10 +1182,13 @@ def analizar():
             }
 
         # ====================================================
-        # 4. INVALIDAR VENTA
+        # VENTA PENDIENTE
         # ====================================================
 
-        if estado["direccion_pendiente"] == "VENTA":
+        if (
+            estado["direccion_pendiente"]
+            == "VENTA"
+        ):
 
             if venta_invalida(
                 tendencia5,
@@ -1151,7 +1198,7 @@ def analizar():
             ):
 
                 print(
-                    "🟢 PREALERTA VENTA INVALIDADA"
+                    "🟢 PREALERTA VENTA DESCARTADA"
                 )
 
                 estado["direccion_pendiente"] = None
@@ -1160,15 +1207,20 @@ def analizar():
                 return {
                     "tipo": "DESCARTADA",
                     "mensaje": (
-                        "🟢 PREALERTA VENTA DESCARTADA\n"
-                        "Las condiciones bajistas "
-                        "dejaron de cumplirse."
+                        "🟢 PREALERTA VENTA "
+                        "DESCARTADA\n\n"
+                        "Las condiciones "
+                        "bajistas dejaron de "
+                        "cumplirse."
                     )
                 }
 
             print(
-                "🔎 VENTA PENDIENTE - "
-                "SIN NUEVA ALERTA"
+                "🔎 VENTA PENDIENTE"
+            )
+
+            print(
+                "⏳ Esperando confirmación..."
             )
 
             return {
@@ -1177,7 +1229,7 @@ def analizar():
             }
 
         # ====================================================
-        # 5. NUEVA PREALERTA COMPRA
+        # NUEVA PREALERTA COMPRA
         # ====================================================
 
         if posible_compra:
@@ -1185,8 +1237,10 @@ def analizar():
             ahora = time.time()
 
             if (
-                ahora - estado["ultima_prealerta"]
-                < MINUTOS_REPETICION * 60
+                ahora -
+                estado["ultima_prealerta"]
+                <
+                MINUTOS_REPETICION * 60
             ):
 
                 print(
@@ -1196,7 +1250,9 @@ def analizar():
 
                 return {
                     "tipo": "SIN_SEÑAL",
-                    "mensaje": "⏳ Esperando confirmación..."
+                    "mensaje": (
+                        "⏳ Esperando confirmación..."
+                    )
                 }
 
             score = calcular_score_compra(
@@ -1211,7 +1267,7 @@ def analizar():
                 di_minus
             )
 
-            resultado = generar_prealerta_compra(
+            resultado = crear_prealerta_compra(
                 precio,
                 atr,
                 score,
@@ -1226,7 +1282,9 @@ def analizar():
             )
 
             estado["direccion_pendiente"] = "COMPRA"
+
             estado["id_pendiente"] = resultado["id"]
+
             estado["ultima_prealerta"] = ahora
 
             print(
@@ -1236,7 +1294,7 @@ def analizar():
             return resultado
 
         # ====================================================
-        # 6. NUEVA PREALERTA VENTA
+        # NUEVA PREALERTA VENTA
         # ====================================================
 
         if posible_venta:
@@ -1244,8 +1302,10 @@ def analizar():
             ahora = time.time()
 
             if (
-                ahora - estado["ultima_prealerta"]
-                < MINUTOS_REPETICION * 60
+                ahora -
+                estado["ultima_prealerta"]
+                <
+                MINUTOS_REPETICION * 60
             ):
 
                 print(
@@ -1255,7 +1315,9 @@ def analizar():
 
                 return {
                     "tipo": "SIN_SEÑAL",
-                    "mensaje": "⏳ Esperando confirmación..."
+                    "mensaje": (
+                        "⏳ Esperando confirmación..."
+                    )
                 }
 
             score = calcular_score_venta(
@@ -1270,7 +1332,7 @@ def analizar():
                 di_minus
             )
 
-            resultado = generar_prealerta_venta(
+            resultado = crear_prealerta_venta(
                 precio,
                 atr,
                 score,
@@ -1285,7 +1347,9 @@ def analizar():
             )
 
             estado["direccion_pendiente"] = "VENTA"
+
             estado["id_pendiente"] = resultado["id"]
+
             estado["ultima_prealerta"] = ahora
 
             print(
@@ -1322,4 +1386,5 @@ def analizar():
             "mensaje": (
                 f"❌ Error estrategia: {e}"
             )
-        }
+    }
+     
