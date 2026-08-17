@@ -236,17 +236,17 @@ async def analizar_loop(app):
 async def inicio(app):
 
     teclado = [
-    [
-        InlineKeyboardButton(
-            "▶️ ENCENDER ANÁLISIS",
-            callback_data="encender"
-        ),
-        InlineKeyboardButton(
-            "⏹️ APAGAR ANÁLISIS",
-            callback_data="apagar"
-        )
+        [
+            InlineKeyboardButton(
+                "▶️ ENCENDER ANÁLISIS",
+                callback_data="encender"
+            ),
+            InlineKeyboardButton(
+                "⏹️ APAGAR ANÁLISIS",
+                callback_data="apagar"
+            )
+        ]
     ]
-]
 
     await app.bot.send_message(
         chat_id=CHAT_ID,
@@ -259,7 +259,7 @@ async def inicio(app):
 📚 Historial activado
 
 🔴 Análisis actualmente APAGADO
-💰 Twelve Data no está consumiendo créditos."""
+💰 Twelve Data no está consumiendo créditos.""",
         reply_markup=InlineKeyboardMarkup(teclado)
     )
 
