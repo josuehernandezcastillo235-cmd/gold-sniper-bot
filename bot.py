@@ -1,17 +1,13 @@
 import os
 import asyncio
+import logging
 
-from telegram import (
-    Update,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup
-)
-
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
     CommandHandler,
     CallbackQueryHandler,
-    ContextTypes
+    ContextTypes,
 )
 
 from strategy import analizar
@@ -26,35 +22,81 @@ CHAT_ID = os.getenv("CHAT_ID")
 
 INTERVALO = 100
 
-encendido = True
 
-ultima_alerta = None
+# =========================================================
+# ESTADO
+# =========================================================
+
+bot_encendido = True
+ultima_senal = None
 
 
 # =========================================================
-# BOTONES
+# LOGGING
+# =========================================================
+
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO
+)
+
+logger = logging.getLogger(__name__)
+
+
+# =========================================================
+# TECLADO
 # =========================================================
 
 def teclado():
 
-    keyboard = [
+    return InlineKeyboardMarkup([
         [
             InlineKeyboardButton(
-                "🟢 ENCENDER",
+                "▶️ ENCENDER",
                 callback_data="encender"
             ),
             InlineKeyboardButton(
-                "🔴 APAGAR",
+                "⏹ APAGAR",
                 callback_data="apagar"
             )
         ]
-    ]
-
-    return InlineKeyboardMarkup(keyboard)
+    ])
 
 
 # =========================================================
-# BOTÓN
+# INICIO DEL BOT
+# =========================================================
+
+async def inicio(app):
+
+    global bot_encendido
+
+    bot_encendido = True
+
+    print("🚀 XAU SNIPER AI V3.3 iniciado correctamente")
+
+    await app.bot.send_message(
+        chat_id=CHAT_ID,
+        text=(
+            "🚀 XAU Sniper AI V3.3 iniciado correctamente.\n\n"
+            "✅ Conexión Telegram: OK\n"
+            "✅ Motor de análisis: OK\n"
+            "📊 Mercado: XAU/USD\n"
+            "⏱ Revisión: cada 100 segundos\n\n"
+            "🟢 Estado: ENCENDIDO\n"
+            "⚠️ Advertencias anticipadas: ACTIVADAS"
+        ),
+        reply_markup=teclado()
+    )
+
+    # Iniciar el ciclo de análisis
+    asyncio.create_task(
+        ciclo_analisis(app)
+    )
+
+
+# =========================================================
+# BOTONES
 # =========================================================
 
 async def botones(
@@ -62,33 +104,49 @@ async def botones(
     context: ContextTypes.DEFAULT_TYPE
 ):
 
-    global encendido
+    global bot_encendido
 
     query = update.callback_query
 
     await query.answer()
 
+    # -----------------------------------------------------
+    # ENCENDER
+    # -----------------------------------------------------
+
     if query.data == "encender":
 
-        encendido = True
+        bot_encendido = True
 
         await query.edit_message_text(
-            "🟢 XAU SNIPER AI V3.3\n\n"
-            "Estado: ENCENDIDO 🟢\n\n"
-            "🔍 Analizando cada 100 segundos...",
+            text=(
+                "🟢 XAU SNIPER AI V3.3\n\n"
+                "▶️ BOT ENCENDIDO\n\n"
+                "🔍 Analizando XAU/USD\n"
+                "⏱ Cada 100 segundos\n"
+                "⚠️ Advertencias anticipadas ACTIVAS"
+            ),
             reply_markup=teclado()
         )
 
         print("🟢 BOT ENCENDIDO")
 
+
+    # -----------------------------------------------------
+    # APAGAR
+    # -----------------------------------------------------
+
     elif query.data == "apagar":
 
-        encendido = False
+        bot_encendido = False
 
         await query.edit_message_text(
-            "🔴 XAU SNIPER AI V3.3\n\n"
-            "Estado: APAGADO 🔴\n\n"
-            "Pulsa ENCENDER para continuar.",
+            text=(
+                "🔴 XAU SNIPER AI V3.3\n\n"
+                "⏹ BOT APAGADO\n\n"
+                "El análisis está detenido.\n"
+                "Pulsa ▶️ ENCENDER para continuar."
+            ),
             reply_markup=teclado()
         )
 
@@ -96,7 +154,7 @@ async def botones(
 
 
 # =========================================================
-# COMANDO /START
+# /START
 # =========================================================
 
 async def start(
@@ -104,83 +162,159 @@ async def start(
     context: ContextTypes.DEFAULT_TYPE
 ):
 
+    global bot_encendido
+
+    bot_encendido = True
+
     await update.message.reply_text(
-        "🥇 XAU SNIPER AI V3.3\n\n"
-        "Control del escáner:",
+        (
+            "🥇 XAU SNIPER AI V3.3\n\n"
+            "🟢 Bot encendido\n"
+            "📊 Mercado: XAU/USD\n"
+            "⏱ Análisis: cada 100 segundos\n\n"
+            "⚠️ Advertencias anticipadas: ACTIVAS\n\n"
+            "🔍 Buscando oportunidades..."
+        ),
         reply_markup=teclado()
     )
 
 
 # =========================================================
-# ANALIZADOR
+# /STATUS
 # =========================================================
 
-async def ciclo():
+async def status(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
 
-    global ultima_alerta
+    if bot_encendido:
+
+        estado = "🟢 ENCENDIDO"
+
+    else:
+
+        estado = "🔴 APAGADO"
+
+    await update.message.reply_text(
+        (
+            "📊 XAU SNIPER AI V3.3\n\n"
+            f"Estado: {estado}\n"
+            "📈 Mercado: XAU/USD\n"
+            "⏱ Intervalo: 100 segundos\n"
+            "⚠️ Advertencia anticipada: ACTIVADA"
+        ),
+        reply_markup=teclado()
+    )
+
+
+# =========================================================
+# CICLO DE ANÁLISIS
+# =========================================================
+
+async def ciclo_analisis(app):
+
+    global ultima_senal
+
+    # Pequeña espera para que Telegram termine de iniciar
+    await asyncio.sleep(3)
 
     while True:
 
         try:
 
-            if encendido:
+            # -------------------------------------------------
+            # BOT APAGADO
+            # -------------------------------------------------
 
-                print("🔍 Analizando...")
+            if not bot_encendido:
 
-                resultado = analizar()
+                print("⏸ Bot apagado")
 
-                tipo = resultado.get(
-                    "tipo",
-                    "SIN_SEÑAL"
-                )
+                await asyncio.sleep(5)
 
-                mensaje = resultado.get(
-                    "mensaje",
-                    "😴 Sin señal"
-                )
+                continue
 
-                print(
-                    f"📩 Tipo: {tipo}"
-                )
 
-                print(mensaje)
+            # -------------------------------------------------
+            # ANALIZAR
+            # -------------------------------------------------
 
-                # =========================================
-                # EVITAR REPETICIONES
-                # =========================================
+            print("🔍 Analizando...")
 
-                if tipo != "SIN_SEÑAL":
+            resultado = analizar()
 
-                    clave = (
-                        tipo,
-                        mensaje
-                    )
 
-                    if clave != ultima_alerta:
+            if resultado is None:
 
-                        ultima_alerta = clave
+                resultado = "😴 Sin señal"
 
-                        await enviar_alerta(
-                            mensaje
+
+            # -------------------------------------------------
+            # MOSTRAR RESULTADO
+            # -------------------------------------------------
+
+            print(resultado)
+
+
+            # -------------------------------------------------
+            # SIN SEÑAL
+            # -------------------------------------------------
+
+            if resultado == "😴 Sin señal":
+
+                print("📩 Tipo: SIN_SEÑAL")
+
+
+            # -------------------------------------------------
+            # HAY SEÑAL
+            # -------------------------------------------------
+
+            else:
+
+                print("📩 NUEVA SEÑAL DETECTADA")
+
+
+                # Evitar duplicados exactos
+                if resultado != ultima_senal:
+
+                    try:
+
+                        await app.bot.send_message(
+                            chat_id=CHAT_ID,
+                            text=resultado,
+                            reply_markup=teclado()
                         )
 
-                    else:
+                        ultima_senal = resultado
 
                         print(
-                            "⏭️ Alerta repetida, no se envía."
+                            "✅ Señal enviada a Telegram"
+                        )
+
+                    except Exception as e:
+
+                        print(
+                            f"❌ Error enviando Telegram: {e}"
                         )
 
                 else:
 
                     print(
-                        "😴 Sin señal"
+                        "♻️ Señal repetida. No se envía."
                     )
 
-            else:
 
-                print(
-                    "⏸️ Bot apagado..."
-                )
+            # -------------------------------------------------
+            # ESPERA
+            # -------------------------------------------------
+
+            print(
+                f"⏳ Esperando {INTERVALO} segundos..."
+            )
+
+            await asyncio.sleep(INTERVALO)
+
 
         except Exception as e:
 
@@ -188,98 +322,56 @@ async def ciclo():
                 f"❌ ERROR EN CICLO: {e}"
             )
 
-        print(
-            f"⏳ Esperando {INTERVALO} segundos..."
-        )
+            try:
 
-        await asyncio.sleep(
-            INTERVALO
-        )
+                await app.bot.send_message(
+                    chat_id=CHAT_ID,
+                    text=(
+                        "❌ Error en XAU Sniper AI V3.3\n\n"
+                        f"{e}"
+                    )
+                )
 
+            except Exception as telegram_error:
 
-# =========================================================
-# ENVIAR ALERTA
-# =========================================================
+                print(
+                    f"❌ Error Telegram: {telegram_error}"
+                )
 
-async def enviar_alerta(mensaje):
-
-    try:
-
-        chat_id = int(CHAT_ID)
-
-        await application.bot.send_message(
-            chat_id=chat_id,
-            text=mensaje,
-            reply_markup=teclado()
-        )
-
-        print(
-            "📩 Alerta enviada a Telegram"
-        )
-
-    except Exception as e:
-
-        print(
-            f"❌ ERROR TELEGRAM: {e}"
-        )
-
-
-# =========================================================
-# INICIO
-# =========================================================
-
-async def inicio():
-
-    global application
-
-    print(
-        "==================================="
-    )
-
-    print(
-        "🔥 BOT.PY V3.3 CARGADO"
-    )
-
-    print(
-        "🚀 XAU SNIPER AI V3.3 ACTIVO"
-    )
-
-    print(
-        "⏱️ Intervalo: 100 segundos"
-    )
-
-    print(
-        "==================================="
-    )
-
-    await application.bot.send_message(
-        chat_id=int(CHAT_ID),
-        text=(
-            "🚀 XAU Sniper AI V3.3 "
-            "iniciado correctamente.\n\n"
-            "✅ Conexión Telegram: OK\n"
-            "✅ Motor de análisis: OK\n"
-            "📊 Mercado: XAU/USD\n"
-            "⏱ Revisión: cada 100 segundos"
-        ),
-        reply_markup=teclado()
-    )
-
-    asyncio.create_task(
-        ciclo()
-    )
+            await asyncio.sleep(INTERVALO)
 
 
 # =========================================================
 # MAIN
 # =========================================================
 
-application = None
-
-
 def main():
 
-    global application
+    # -----------------------------------------------------
+    # VALIDAR VARIABLES
+    # -----------------------------------------------------
+
+    if not BOT_TOKEN:
+
+        raise ValueError(
+            "❌ Falta BOT_TOKEN en Railway"
+        )
+
+    if not CHAT_ID:
+
+        raise ValueError(
+            "❌ Falta CHAT_ID en Railway"
+        )
+
+
+    print(
+        "🚀 Iniciando XAU SNIPER AI V3.3..."
+    )
+
+
+    # -----------------------------------------------------
+    # CREAR APPLICATION
+    # -----------------------------------------------------
 
     application = (
         Application.builder()
@@ -288,6 +380,11 @@ def main():
         .build()
     )
 
+
+    # -----------------------------------------------------
+    # COMANDOS
+    # -----------------------------------------------------
+
     application.add_handler(
         CommandHandler(
             "start",
@@ -295,18 +392,54 @@ def main():
         )
     )
 
+
+    application.add_handler(
+        CommandHandler(
+            "status",
+            status
+        )
+    )
+
+
+    # -----------------------------------------------------
+    # BOTONES
+    # -----------------------------------------------------
+
     application.add_handler(
         CallbackQueryHandler(
             botones
         )
     )
 
+
+    # -----------------------------------------------------
+    # INICIAR
+    # -----------------------------------------------------
+
     print(
-        "🚀 Iniciando XAU SNIPER AI V3.3..."
+        "✅ Telegram configurado"
     )
+
+    print(
+        "✅ Motor de análisis configurado"
+    )
+
+    print(
+        "⏱ Intervalo: 100 segundos"
+    )
+
+    print(
+        "⚠️ Advertencias anticipadas: ACTIVADAS"
+    )
+
 
     application.run_polling()
 
 
+# =========================================================
+# EJECUTAR
+# =========================================================
+
 if __name__ == "__main__":
+
     main()
