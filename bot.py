@@ -13,7 +13,7 @@ from strategy import analizar
 
 
 # =========================================================
-# CONFIGURACIÓN
+# XAU SNIPER AI V3.4
 # =========================================================
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -72,44 +72,56 @@ async def inicio(application):
 
     bot_encendido = False
 
-    print("🚀 XAU SNIPER AI V3.3 iniciado correctamente")
+    print(
+        "🚀 XAU SNIPER AI V3.4 iniciado correctamente"
+    )
 
     await application.bot.send_message(
         chat_id=CHAT_ID,
         text=(
-            "🚀 XAU Sniper AI V3.3 iniciado correctamente.\n\n"
+            "🚀 XAU Sniper AI V3.4 iniciado correctamente.\n\n"
             "✅ Conexión Telegram: OK\n"
             "✅ Motor de análisis: OK\n"
             "📊 Mercado: XAU/USD\n"
-            "⏱ Revisión: cada 100 segundos\n\n"
-            "🟢 Estado: ENCENDIDO\n"
-            "⚠️ Advertencias anticipadas: ACTIVADAS"
+            "⏱ Revisión: cada 100 segundos\n"
+            "🕯️ Análisis: velas cerradas\n\n"
+            "🔴 Estado: APAGADO\n"
+            "▶️ Pulsa ENCENDER para comenzar."
         ),
         reply_markup=teclado()
     )
 
-    print("✅ Mensaje de inicio enviado")
-    print("⏱️ Analizador programado cada 100 segundos")
+    print(
+        "✅ Mensaje de inicio enviado"
+    )
+
+    print(
+        "⏱️ Analizador programado cada 100 segundos"
+    )
 
 
 # =========================================================
 # ANÁLISIS PROGRAMADO
 # =========================================================
 
-async def ejecutar_analisis(context: ContextTypes.DEFAULT_TYPE):
+async def ejecutar_analisis(
+    context: ContextTypes.DEFAULT_TYPE
+):
 
     global ultima_senal
 
     if not bot_encendido:
 
-        print("⏸️ Bot apagado. No se analiza.")
+        print(
+            "⏸️ Bot apagado. No se analiza."
+        )
 
         return
 
     try:
 
         print("===================================")
-        print("🔍 Analizando...")
+        print("🔍 Analizando XAU/USD...")
 
         resultado = analizar()
 
@@ -119,7 +131,9 @@ async def ejecutar_analisis(context: ContextTypes.DEFAULT_TYPE):
 
         if resultado is None:
 
-            print("⚠️ Strategy devolvió None")
+            print(
+                "⚠️ Strategy devolvió None"
+            )
 
             return
 
@@ -157,7 +171,9 @@ async def ejecutar_analisis(context: ContextTypes.DEFAULT_TYPE):
 
         if tipo == "SIN_SEÑAL":
 
-            print("😴 Sin señal")
+            print(
+                "😴 Sin señal"
+            )
 
             return
 
@@ -167,7 +183,9 @@ async def ejecutar_analisis(context: ContextTypes.DEFAULT_TYPE):
 
         if tipo == "ERROR":
 
-            print("❌ Error de estrategia")
+            print(
+                "❌ Error de estrategia"
+            )
 
             await context.bot.send_message(
                 chat_id=CHAT_ID,
@@ -177,7 +195,7 @@ async def ejecutar_analisis(context: ContextTypes.DEFAULT_TYPE):
             return
 
         # -------------------------------------------------
-        # SEÑAL
+        # EVITAR DUPLICADOS
         # -------------------------------------------------
 
         if mensaje == ultima_senal:
@@ -215,7 +233,7 @@ async def ejecutar_analisis(context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_message(
                 chat_id=CHAT_ID,
                 text=(
-                    "❌ Error en XAU Sniper AI V3.3\n\n"
+                    "❌ Error en XAU Sniper AI V3.4\n\n"
                     f"{e}"
                 )
             )
@@ -223,7 +241,7 @@ async def ejecutar_analisis(context: ContextTypes.DEFAULT_TYPE):
         except Exception as telegram_error:
 
             print(
-                f"❌ Error enviando error a Telegram: "
+                "❌ Error enviando error a Telegram: "
                 f"{telegram_error}"
             )
 
@@ -253,17 +271,19 @@ async def botones(
 
         await query.edit_message_text(
             text=(
-                "🟢 XAU SNIPER AI V3.3\n\n"
+                "🟢 XAU SNIPER AI V3.4\n\n"
                 "▶️ BOT ENCENDIDO\n\n"
                 "🔍 Analizando XAU/USD\n"
                 "⏱ Cada 100 segundos\n"
-                "⚠️ Advertencias anticipadas ACTIVAS"
+                "🕯️ Usando velas cerradas\n"
+                "🎯 Pullback + continuación ACTIVOS"
             ),
             reply_markup=teclado()
         )
 
-        print("🟢 BOT ENCENDIDO")
-
+        print(
+            "🟢 BOT ENCENDIDO"
+        )
 
     # -----------------------------------------------------
     # APAGAR
@@ -275,7 +295,7 @@ async def botones(
 
         await query.edit_message_text(
             text=(
-                "🔴 XAU SNIPER AI V3.3\n\n"
+                "🔴 XAU SNIPER AI V3.4\n\n"
                 "⏹ BOT APAGADO\n\n"
                 "El análisis está detenido.\n"
                 "Pulsa ▶️ ENCENDER para continuar."
@@ -283,7 +303,9 @@ async def botones(
             reply_markup=teclado()
         )
 
-        print("🔴 BOT APAGADO")
+        print(
+            "🔴 BOT APAGADO"
+        )
 
 
 # =========================================================
@@ -301,17 +323,20 @@ async def start(
 
     await update.message.reply_text(
         (
-            "🥇 XAU SNIPER AI V3.3\n\n"
+            "🥇 XAU SNIPER AI V3.4\n\n"
             "🟢 Bot encendido\n"
             "📊 Mercado: XAU/USD\n"
-            "⏱ Análisis: cada 100 segundos\n\n"
-            "⚠️ Advertencias anticipadas: ACTIVAS\n\n"
+            "⏱ Análisis: cada 100 segundos\n"
+            "🕯️ Análisis con velas cerradas\n"
+            "🎯 Pullback + continuación ACTIVOS\n\n"
             "🔍 Buscando oportunidades..."
         ),
         reply_markup=teclado()
     )
 
-    print("🟢 /start recibido")
+    print(
+        "🟢 /start recibido"
+    )
 
 
 # =========================================================
@@ -325,19 +350,21 @@ async def status(
 
     if bot_encendido:
 
-        estado = "🟢 ENCENDIDO"
+        estado_actual = "🟢 ENCENDIDO"
 
     else:
 
-        estado = "🔴 APAGADO"
+        estado_actual = "🔴 APAGADO"
 
     await update.message.reply_text(
         (
-            "📊 XAU SNIPER AI V3.3\n\n"
-            f"Estado: {estado}\n"
+            "📊 XAU SNIPER AI V3.4\n\n"
+            f"Estado: {estado_actual}\n"
             "📈 Mercado: XAU/USD\n"
             "⏱ Intervalo: 100 segundos\n"
-            "⚠️ Advertencias anticipadas: ACTIVADAS"
+            "🕯️ Velas cerradas: ACTIVAS\n"
+            "🎯 Pullback + continuación: ACTIVOS\n"
+            "📊 ADX mínimo confirmación: 20"
         ),
         reply_markup=teclado()
     )
@@ -366,7 +393,7 @@ def main():
         )
 
     print(
-        "🚀 Iniciando XAU SNIPER AI V3.3..."
+        "🚀 Iniciando XAU SNIPER AI V3.4..."
     )
 
     print(
@@ -378,7 +405,15 @@ def main():
     )
 
     print(
-        "⚠️ Advertencias anticipadas: ACTIVADAS"
+        "🕯️ Análisis con velas cerradas"
+    )
+
+    print(
+        "🎯 Pullback + continuación ACTIVOS"
+    )
+
+    print(
+        "📊 ADX mínimo confirmación: 20"
     )
 
     # -----------------------------------------------------
