@@ -10,7 +10,7 @@ from ta.volatility import AverageTrueRange
 
 
 # ============================================================
-# XAU SNIPER AI V3.4
+# XAU SNIPER AI V3.4.1
 # ============================================================
 
 API_KEY = os.getenv("API_KEY")
@@ -20,29 +20,19 @@ SYMBOL = "XAU/USD"
 INTERVALO_5M = "5min"
 INTERVALO_15M = "15min"
 
-# Tiempo mínimo entre nuevas prealertas
 MINUTOS_REPETICION = 15
+MINUTOS_EXPIRACION = 8
 
-# Confirmación
-ADX_MINIMO_CONFIRMACION = 20
+ADX_MINIMO_CONFIRMACION = 15
 
 RSI_COMPRA_MIN = 55
 RSI_VENTA_MAX = 45
 
-# SL / TP
 ATR_SL = 1.3
 ATR_TP = 2.2
 
-# ============================================================
-# PULLBACK
-# ============================================================
-
-# Distancia máxima aproximada respecto a EMA20 para considerar
-# que el precio está trabajando una zona de pullback.
-PULLBACK_ATR_MAX = 0.60
-
-# Número de velas recientes utilizadas para detectar pullback.
-VELAS_PULLBACK = 3
+# Distancia máxima permitida desde la entrada confirmada
+MAX_ENTRADA_ATR = 0.35
 
 
 # ============================================================
@@ -53,7 +43,12 @@ estado = {
     "direccion_pendiente": None,
     "id_pendiente": None,
     "ultima_prealerta": 0,
-    "ultima_confirmacion": 0
+    "ultima_confirmacion": 0,
+
+    "confirmacion_activa": None,
+    "entrada_confirmada": None,
+    "atr_confirmacion": None,
+    "hora_confirmacion": 0
 }
 
 
@@ -66,19 +61,15 @@ def obtener_datos(intervalo):
     if not API_KEY:
         raise Exception("API_KEY no configurada")
 
-    url = "https://api.twelvedata.com/time_series"
-
-    params = {
-        "symbol": SYMBOL,
-        "interval": intervalo,
-        "outputsize": 5000,
-        "apikey": API_KEY,
-        "format": "JSON"
-    }
-
     respuesta = requests.get(
-        url,
-        params=params,
+        "https://api.twelvedata.com/time_series",
+        params={
+            "symbol": SYMBOL,
+            "interval": intervalo,
+            "outputsize": 500,
+            "apikey": API_KEY,
+            "format": "JSON"
+        },
         timeout=20
     )
 
@@ -98,16 +89,13 @@ def obtener_datos(intervalo):
             f"Datos vacíos para {intervalo}"
         )
 
-    # --------------------------------------------------------
-    # Convertir precios
-    # --------------------------------------------------------
-
     for columna in [
         "open",
         "high",
         "low",
         "close"
     ]:
+
         df[columna] = pd.to_numeric(
             df[columna],
             errors="coerce"
@@ -128,12 +116,9 @@ def obtener_datos(intervalo):
         ]
     )
 
-    # Orden cronológico
     df = df.sort_values(
         "datetime"
-    )
-
-    df = df.reset_index(
+    ).reset_index(
         drop=True
     )
 
@@ -151,60 +136,52 @@ def obtener_datos(intervalo):
 
 def calcular_indicadores(df):
 
-    df = df.copy()
-
-    # EMA 20
     df["ema20"] = EMAIndicator(
-        close=df["close"],
-        window=20
+        df["close"],
+        20
     ).ema_indicator()
 
-    # EMA 50
     df["ema50"] = EMAIndicator(
-        close=df["close"],
-        window=50
+        df["close"],
+        50
     ).ema_indicator()
 
-    # EMA 200
     df["ema200"] = EMAIndicator(
-        close=df["close"],
-        window=200
+        df["close"],
+        200
     ).ema_indicator()
 
-    # RSI
     df["rsi"] = RSIIndicator(
-        close=df["close"],
-        window=14
+        df["close"],
+        14
     ).rsi()
 
-    # ATR
     df["atr"] = AverageTrueRange(
-        high=df["high"],
-        low=df["low"],
-        close=df["close"],
-        window=14
+        df["high"],
+        df["low"],
+        df["close"],
+        14
     ).average_true_range()
 
-    # ADX
     adx = ADXIndicator(
-        high=df["high"],
-        low=df["low"],
-        close=df["close"],
-        window=14
+        df["high"],
+        df["low"],
+        df["close"],
+        14
     )
 
     df["adx"] = adx.adx()
+
     df["di_plus"] = adx.adx_pos()
+
     df["di_minus"] = adx.adx_neg()
 
-    # Eliminar filas incompletas
     df = df.dropna().reset_index(
         drop=True
     )
 
     print(
-        f"📊 Velas útiles después de indicadores: "
-        f"{len(df)}"
+        f"📊 Velas útiles: {len(df)}"
     )
 
     return df
@@ -216,7 +193,6 @@ def calcular_indicadores(df):
 
 def obtener_tendencia(row):
 
-    # ALCISTA
     if (
         row["ema20"] > row["ema50"]
         and
@@ -224,9 +200,9 @@ def obtener_tendencia(row):
         and
         row["close"] > row["ema20"]
     ):
+
         return "ALCISTA"
 
-    # BAJISTA
     if (
         row["ema20"] < row["ema50"]
         and
@@ -234,6 +210,7 @@ def obtener_tendencia(row):
         and
         row["close"] < row["ema20"]
     ):
+
         return "BAJISTA"
 
     return "NEUTRAL"
@@ -324,101 +301,6 @@ def calcular_score_venta(
 
 
 # ============================================================
-# DETECTAR PULLBACK COMPRA
-# ============================================================
-
-def detectar_pullback_compra(
-    df,
-    indice_actual
-):
-
-    if indice_actual < VELAS_PULLBACK:
-        return False
-
-    actual = df.iloc[indice_actual]
-
-    inicio = indice_actual - VELAS_PULLBACK
-
-    recientes = df.iloc[
-        inicio:indice_actual + 1
-    ]
-
-    # Debe existir una aproximación del precio a EMA20
-    # durante las últimas velas.
-    distancia_minima = (
-        recientes["low"] -
-        recientes["ema20"]
-    ).abs().min()
-
-    atr = float(actual["atr"])
-
-    if atr <= 0:
-        return False
-
-    cerca_ema20 = (
-        distancia_minima <=
-        atr * PULLBACK_ATR_MAX
-    )
-
-    # El precio actual debe seguir sobre EMA50.
-    estructura_sigue_alcista = (
-        actual["close"] > actual["ema50"]
-    )
-
-    return (
-        cerca_ema20
-        and
-        estructura_sigue_alcista
-    )
-
-
-# ============================================================
-# DETECTAR PULLBACK VENTA
-# ============================================================
-
-def detectar_pullback_venta(
-    df,
-    indice_actual
-):
-
-    if indice_actual < VELAS_PULLBACK:
-        return False
-
-    actual = df.iloc[indice_actual]
-
-    inicio = indice_actual - VELAS_PULLBACK
-
-    recientes = df.iloc[
-        inicio:indice_actual + 1
-    ]
-
-    distancia_minima = (
-        recientes["high"] -
-        recientes["ema20"]
-    ).abs().min()
-
-    atr = float(actual["atr"])
-
-    if atr <= 0:
-        return False
-
-    cerca_ema20 = (
-        distancia_minima <=
-        atr * PULLBACK_ATR_MAX
-    )
-
-    estructura_sigue_bajista = (
-        actual["close"] < actual["ema50"]
-    )
-
-    return (
-        cerca_ema20
-        and
-        estructura_sigue_bajista
-    )
-
-
-# ============================================================
 # POSIBLE COMPRA
 # ============================================================
 
@@ -426,19 +308,11 @@ def es_posible_compra(
     tendencia5,
     tendencia15,
     precio,
-    ema20,
     ema50,
     rsi,
     di_plus,
-    di_minus,
-    df5,
-    indice_actual
+    di_minus
 ):
-
-    pullback = detectar_pullback_compra(
-        df5,
-        indice_actual
-    )
 
     return (
         tendencia5 == "ALCISTA"
@@ -447,13 +321,9 @@ def es_posible_compra(
         and
         precio > ema50
         and
-        precio >= ema20
-        and
         rsi >= 50
         and
         di_plus >= di_minus
-        and
-        pullback
     )
 
 
@@ -465,19 +335,11 @@ def es_posible_venta(
     tendencia5,
     tendencia15,
     precio,
-    ema20,
     ema50,
     rsi,
     di_plus,
-    di_minus,
-    df5,
-    indice_actual
+    di_minus
 ):
-
-    pullback = detectar_pullback_venta(
-        df5,
-        indice_actual
-    )
 
     return (
         tendencia5 == "BAJISTA"
@@ -486,13 +348,9 @@ def es_posible_venta(
         and
         precio < ema50
         and
-        precio <= ema20
-        and
         rsi <= 50
         and
         di_minus >= di_plus
-        and
-        pullback
     )
 
 
@@ -509,19 +367,8 @@ def compra_confirmada(
     rsi,
     adx,
     di_plus,
-    di_minus,
-    vela_actual,
-    vela_anterior
+    di_minus
 ):
-
-    # Continuación alcista:
-    # la vela cerrada actual debe estar sobre EMA20
-    # y mostrar recuperación respecto a la vela anterior.
-    continuacion = (
-        vela_actual["close"] > vela_actual["ema20"]
-        and
-        vela_actual["close"] > vela_anterior["close"]
-    )
 
     return (
         tendencia5 == "ALCISTA"
@@ -537,8 +384,6 @@ def compra_confirmada(
         adx >= ADX_MINIMO_CONFIRMACION
         and
         di_plus > di_minus
-        and
-        continuacion
     )
 
 
@@ -555,16 +400,8 @@ def venta_confirmada(
     rsi,
     adx,
     di_plus,
-    di_minus,
-    vela_actual,
-    vela_anterior
+    di_minus
 ):
-
-    continuacion = (
-        vela_actual["close"] < vela_actual["ema20"]
-        and
-        vela_actual["close"] < vela_anterior["close"]
-    )
 
     return (
         tendencia5 == "BAJISTA"
@@ -580,13 +417,57 @@ def venta_confirmada(
         adx >= ADX_MINIMO_CONFIRMACION
         and
         di_minus > di_plus
-        and
-        continuacion
     )
 
 
 # ============================================================
-# INVALIDAR COMPRA
+# PULLBACK REAL
+# ============================================================
+
+def pullback_compra(df):
+
+    actual = df.iloc[-2]
+    previa1 = df.iloc[-3]
+    previa2 = df.iloc[-4]
+
+    retroceso = (
+        previa1["low"] <= previa1["ema20"]
+        or
+        previa2["low"] <= previa2["ema20"]
+    )
+
+    continuacion = (
+        actual["close"] > previa1["high"]
+    )
+
+    return bool(
+        retroceso and continuacion
+    )
+
+
+def pullback_venta(df):
+
+    actual = df.iloc[-2]
+    previa1 = df.iloc[-3]
+    previa2 = df.iloc[-4]
+
+    retroceso = (
+        previa1["high"] >= previa1["ema20"]
+        or
+        previa2["high"] >= previa2["ema20"]
+    )
+
+    continuacion = (
+        actual["close"] < previa1["low"]
+    )
+
+    return bool(
+        retroceso and continuacion
+    )
+
+
+# ============================================================
+# INVALIDACIONES
 # ============================================================
 
 def compra_invalida(
@@ -605,10 +486,6 @@ def compra_invalida(
     )
 
 
-# ============================================================
-# INVALIDAR VENTA
-# ============================================================
-
 def venta_invalida(
     tendencia5,
     tendencia15,
@@ -626,10 +503,10 @@ def venta_invalida(
 
 
 # ============================================================
-# CREAR PREALERTA COMPRA
+# PREALERTA COMPRA
 # ============================================================
 
-def crear_prealerta_compra(
+def prealerta_compra(
     precio,
     atr,
     score,
@@ -643,22 +520,20 @@ def crear_prealerta_compra(
     ema50
 ):
 
-    entrada = round(precio, 2)
-
     sl = round(
-        entrada - atr * ATR_SL,
+        precio - atr * ATR_SL,
         2
     )
 
     tp = round(
-        entrada + atr * ATR_TP,
+        precio + atr * ATR_TP,
         2
     )
 
     identificador = uuid.uuid4().hex[:6]
 
     mensaje = f"""
-🥇 XAU SNIPER AI V3.4
+🥇 XAU SNIPER AI V3.4.1
 
 ID: {identificador}
 
@@ -674,7 +549,7 @@ ID: {identificador}
 
 📋 REFERENCIA
 
-Precio: {entrada:.2f}
+Precio: {precio:.2f}
 
 🛑 SL referencia:
 {sl:.2f}
@@ -691,7 +566,7 @@ DI-: {di_minus:.1f}
 EMA20: {ema20:.2f}
 EMA50: {ema50:.2f}
 
-🧠 Pullback alcista detectado
+🧠 Momentum alcista
 📈 Precio sobre EMA50
 
 🔎 PREALERTA GUARDADA
@@ -706,10 +581,10 @@ EMA50: {ema50:.2f}
 
 
 # ============================================================
-# CREAR PREALERTA VENTA
+# PREALERTA VENTA
 # ============================================================
 
-def crear_prealerta_venta(
+def prealerta_venta(
     precio,
     atr,
     score,
@@ -723,22 +598,20 @@ def crear_prealerta_venta(
     ema50
 ):
 
-    entrada = round(precio, 2)
-
     sl = round(
-        entrada + atr * ATR_SL,
+        precio + atr * ATR_SL,
         2
     )
 
     tp = round(
-        entrada - atr * ATR_TP,
+        precio - atr * ATR_TP,
         2
     )
 
     identificador = uuid.uuid4().hex[:6]
 
     mensaje = f"""
-🥇 XAU SNIPER AI V3.4
+🥇 XAU SNIPER AI V3.4.1
 
 ID: {identificador}
 
@@ -754,7 +627,7 @@ ID: {identificador}
 
 📋 REFERENCIA
 
-Precio: {entrada:.2f}
+Precio: {precio:.2f}
 
 🛑 SL referencia:
 {sl:.2f}
@@ -771,7 +644,7 @@ DI-: {di_minus:.1f}
 EMA20: {ema20:.2f}
 EMA50: {ema50:.2f}
 
-🧠 Pullback bajista detectado
+🧠 Momentum bajista
 📉 Precio bajo EMA50
 
 🔎 PREALERTA GUARDADA
@@ -786,10 +659,10 @@ EMA50: {ema50:.2f}
 
 
 # ============================================================
-# CREAR COMPRA CONFIRMADA
+# COMPRA CONFIRMADA
 # ============================================================
 
-def crear_compra_confirmada(
+def confirmacion_compra(
     precio,
     atr,
     score,
@@ -803,15 +676,28 @@ def crear_compra_confirmada(
     ema50
 ):
 
-    entrada = round(precio, 2)
-
     sl = round(
-        entrada - atr * ATR_SL,
+        precio - atr * ATR_SL,
         2
     )
 
     tp = round(
-        entrada + atr * ATR_TP,
+        precio + atr * ATR_TP,
+        2
+    )
+
+    distancia = round(
+        atr * MAX_ENTRADA_ATR,
+        2
+    )
+
+    zona_min = round(
+        precio - distancia,
+        2
+    )
+
+    zona_max = round(
+        precio + distancia,
         2
     )
 
@@ -822,7 +708,7 @@ def crear_compra_confirmada(
     )
 
     mensaje = f"""
-🥇 XAU SNIPER AI V3.4
+🥇 XAU SNIPER AI V3.4.1
 
 ID: {identificador}
 
@@ -834,9 +720,12 @@ ID: {identificador}
 5M: {tendencia5}
 15M: {tendencia15}
 
-📋 ENTRADA
+📋 ENTRADA IDEAL
 
-Precio: {entrada:.2f}
+Precio: {precio:.2f}
+
+📏 ZONA VÁLIDA:
+{zona_min:.2f} - {zona_max:.2f}
 
 🛑 SL:
 {sl:.2f}
@@ -852,6 +741,9 @@ DI-: {di_minus:.1f}
 
 EMA20: {ema20:.2f}
 EMA50: {ema50:.2f}
+
+⚠️ Si el precio actual está fuera
+de la zona, NO ENTRAR.
 
 ✅ Precio sobre EMA20
 ✅ EMA20 sobre EMA50
@@ -869,10 +761,10 @@ EMA50: {ema50:.2f}
 
 
 # ============================================================
-# CREAR VENTA CONFIRMADA
+# VENTA CONFIRMADA
 # ============================================================
 
-def crear_venta_confirmada(
+def confirmacion_venta(
     precio,
     atr,
     score,
@@ -886,15 +778,28 @@ def crear_venta_confirmada(
     ema50
 ):
 
-    entrada = round(precio, 2)
-
     sl = round(
-        entrada + atr * ATR_SL,
+        precio + atr * ATR_SL,
         2
     )
 
     tp = round(
-        entrada - atr * ATR_TP,
+        precio - atr * ATR_TP,
+        2
+    )
+
+    distancia = round(
+        atr * MAX_ENTRADA_ATR,
+        2
+    )
+
+    zona_min = round(
+        precio - distancia,
+        2
+    )
+
+    zona_max = round(
+        precio + distancia,
         2
     )
 
@@ -905,7 +810,7 @@ def crear_venta_confirmada(
     )
 
     mensaje = f"""
-🥇 XAU SNIPER AI V3.4
+🥇 XAU SNIPER AI V3.4.1
 
 ID: {identificador}
 
@@ -917,9 +822,12 @@ ID: {identificador}
 5M: {tendencia5}
 15M: {tendencia15}
 
-📋 ENTRADA
+📋 ENTRADA IDEAL
 
-Precio: {entrada:.2f}
+Precio: {precio:.2f}
+
+📏 ZONA VÁLIDA:
+{zona_min:.2f} - {zona_max:.2f}
 
 🛑 SL:
 {sl:.2f}
@@ -935,6 +843,9 @@ DI-: {di_minus:.1f}
 
 EMA20: {ema20:.2f}
 EMA50: {ema50:.2f}
+
+⚠️ Si el precio actual está fuera
+de la zona, NO ENTRAR.
 
 ✅ Precio bajo EMA20
 ✅ EMA20 bajo EMA50
@@ -952,6 +863,137 @@ EMA50: {ema50:.2f}
 
 
 # ============================================================
+# LIMPIAR ESTADOS
+# ============================================================
+
+def limpiar_pendiente():
+
+    estado["direccion_pendiente"] = None
+    estado["id_pendiente"] = None
+
+
+def limpiar_confirmacion():
+
+    estado["confirmacion_activa"] = None
+    estado["entrada_confirmada"] = None
+    estado["atr_confirmacion"] = None
+    estado["hora_confirmacion"] = 0
+
+    limpiar_pendiente()
+
+
+def reiniciar_estado():
+
+    estado["direccion_pendiente"] = None
+    estado["id_pendiente"] = None
+    estado["ultima_prealerta"] = 0
+    estado["ultima_confirmacion"] = 0
+    estado["confirmacion_activa"] = None
+    estado["entrada_confirmada"] = None
+    estado["atr_confirmacion"] = None
+    estado["hora_confirmacion"] = 0
+
+
+# ============================================================
+# REVISAR CONFIRMACIÓN ACTIVA
+# ============================================================
+
+def revisar_confirmacion(precio):
+
+    direccion = estado["confirmacion_activa"]
+
+    entrada = estado["entrada_confirmada"]
+
+    atr = estado["atr_confirmacion"]
+
+    hora = estado["hora_confirmacion"]
+
+    if (
+        not direccion
+        or
+        not entrada
+        or
+        not atr
+        or
+        not hora
+    ):
+
+        return None
+
+    limite = (
+        atr * MAX_ENTRADA_ATR
+    )
+
+    distancia = abs(
+        precio - entrada
+    )
+
+    tiempo_excedido = (
+        time.time() - hora
+        >
+        MINUTOS_EXPIRACION * 60
+    )
+
+    distancia_excedida = (
+        distancia > limite
+    )
+
+    if (
+        tiempo_excedido
+        or
+        distancia_excedida
+    ):
+
+        if tiempo_excedido:
+
+            motivo = (
+                f"superó "
+                f"{MINUTOS_EXPIRACION} minutos"
+            )
+
+        else:
+
+            motivo = (
+                f"se alejó "
+                f"{distancia:.2f} puntos; "
+                f"límite {limite:.2f}"
+            )
+
+        if direccion == "COMPRA":
+
+            icono = "🟢"
+
+        else:
+
+            icono = "🔴"
+
+        mensaje = f"""
+⚠️ SEÑAL VENCIDA
+
+{icono} {direccion}
+
+Entrada original:
+{entrada:.2f}
+
+Precio actual:
+{precio:.2f}
+
+❌ NO ENTRAR
+
+La señal {motivo}.
+""".strip()
+
+        limpiar_confirmacion()
+
+        return {
+            "tipo": "DESCARTADA",
+            "mensaje": mensaje
+        }
+
+    return None
+
+
+# ============================================================
 # ANALIZAR
 # ============================================================
 
@@ -960,88 +1002,53 @@ def analizar():
     try:
 
         print("")
-        print("===================================")
-        print("🔍 XAU SNIPER AI V3.4")
-        print("🔍 Analizando XAU/USD...")
-        print("===================================")
+        print(
+            "==================================="
+        )
+        print(
+            "🔍 Analizando XAU/USD V3.4.1"
+        )
+        print(
+            "==================================="
+        )
 
         # ----------------------------------------------------
         # DATOS
         # ----------------------------------------------------
 
-        df5 = obtener_datos(
-            INTERVALO_5M
-        )
-
-        df15 = obtener_datos(
-            INTERVALO_15M
-        )
-
-        print(
-            "✅ Datos 5M y 15M recibidos"
-        )
-
-        # ----------------------------------------------------
-        # INDICADORES
-        # ----------------------------------------------------
-
         df5 = calcular_indicadores(
-            df5
+            obtener_datos(
+                INTERVALO_5M
+            )
         )
 
         df15 = calcular_indicadores(
-            df15
+            obtener_datos(
+                INTERVALO_15M
+            )
         )
 
-        print(
-            f"📊 Filas útiles 5M: {len(df5)}"
-        )
-
-        print(
-            f"📊 Filas útiles 15M: {len(df15)}"
-        )
-
-        # ----------------------------------------------------
-        # COMPROBAR DATOS
-        # ----------------------------------------------------
-
-        if len(df5) < 10:
+        if len(df5) < 4:
 
             raise Exception(
-                f"No hay suficientes datos 5M: {len(df5)}"
+                f"Datos insuficientes 5M: "
+                f"{len(df5)}"
             )
 
-        if len(df15) < 10:
+        if len(df15) < 4:
 
             raise Exception(
-                f"No hay suficientes datos 15M: {len(df15)}"
+                f"Datos insuficientes 15M: "
+                f"{len(df15)}"
             )
 
         # ----------------------------------------------------
-        # USAR ÚLTIMA VELA CERRADA
+        # ÚLTIMA VELA CERRADA
         # ----------------------------------------------------
 
-        indice5 = len(df5) - 2
-        indice15 = len(df15) - 2
+        actual5 = df5.iloc[-2]
 
-        actual5 = df5.iloc[indice5]
-        anterior5 = df5.iloc[indice5 - 1]
-
-        actual15 = df15.iloc[indice15]
-
-        print(
-            f"🕯️ Vela 5M analizada: "
-            f"{actual5['datetime']}"
-        )
-
-        print(
-            f"🕯️ Vela 15M analizada: "
-            f"{actual15['datetime']}"
-        )
-
-        # ----------------------------------------------------
-        # VALORES 5M
-        # ----------------------------------------------------
+        actual15 = df15.iloc[-2]
 
         precio = float(
             actual5["close"]
@@ -1079,10 +1086,6 @@ def analizar():
             actual5["di_minus"]
         )
 
-        # ----------------------------------------------------
-        # TENDENCIAS
-        # ----------------------------------------------------
-
         tendencia5 = obtener_tendencia(
             actual5
         )
@@ -1091,16 +1094,12 @@ def analizar():
             actual15
         )
 
-        # ----------------------------------------------------
-        # DEBUG
-        # ----------------------------------------------------
-
         print("")
         print("📊 DATOS ACTUALES")
         print("-----------------------------------")
 
         print(
-            f"💰 Precio cerrado: {precio:.2f}"
+            f"💰 Precio: {precio:.2f}"
         )
 
         print(
@@ -1140,32 +1139,36 @@ def analizar():
         )
 
         # ----------------------------------------------------
-        # PULLBACK
+        # REVISAR SEÑAL CONFIRMADA ACTIVA
         # ----------------------------------------------------
 
-        pullback_compra = detectar_pullback_compra(
-            df5,
-            indice5
+        vencida = revisar_confirmacion(
+            precio
         )
 
-        pullback_venta = detectar_pullback_venta(
-            df5,
-            indice5
-        )
+        if vencida:
 
-        print("")
-        print("🔄 PULLBACK")
-        print("-----------------------------------")
+            print(
+                "⚠️ CONFIRMACIÓN VENCIDA"
+            )
 
-        print(
-            f"🟢 Pullback compra: "
-            f"{pullback_compra}"
-        )
+            return vencida
 
-        print(
-            f"🔴 Pullback venta: "
-            f"{pullback_venta}"
-        )
+        # Si hay una confirmación activa
+        # no se genera otra señal.
+
+        if estado["confirmacion_activa"]:
+
+            print(
+                "⏳ Confirmación activa."
+            )
+
+            return {
+                "tipo": "SIN_SEÑAL",
+                "mensaje": (
+                    "⏳ Confirmación activa..."
+                )
+            }
 
         # ----------------------------------------------------
         # CONDICIONES
@@ -1175,26 +1178,20 @@ def analizar():
             tendencia5,
             tendencia15,
             precio,
-            ema20,
             ema50,
             rsi,
             di_plus,
-            di_minus,
-            df5,
-            indice5
+            di_minus
         )
 
         posible_venta = es_posible_venta(
             tendencia5,
             tendencia15,
             precio,
-            ema20,
             ema50,
             rsi,
             di_plus,
-            di_minus,
-            df5,
-            indice5
+            di_minus
         )
 
         confirmada_compra = compra_confirmada(
@@ -1206,9 +1203,7 @@ def analizar():
             rsi,
             adx,
             di_plus,
-            di_minus,
-            actual5,
-            anterior5
+            di_minus
         )
 
         confirmada_venta = venta_confirmada(
@@ -1220,9 +1215,15 @@ def analizar():
             rsi,
             adx,
             di_plus,
-            di_minus,
-            actual5,
-            anterior5
+            di_minus
+        )
+
+        pullback_c = pullback_compra(
+            df5
+        )
+
+        pullback_v = pullback_venta(
+            df5
         )
 
         print("")
@@ -1249,6 +1250,16 @@ def analizar():
             f"{confirmada_venta}"
         )
 
+        print(
+            f"📈 Pullback compra: "
+            f"{pullback_c}"
+        )
+
+        print(
+            f"📉 Pullback venta: "
+            f"{pullback_v}"
+        )
+
         # ====================================================
         # CONFIRMACIÓN COMPRA
         # ====================================================
@@ -1258,6 +1269,8 @@ def analizar():
             == "COMPRA"
             and
             confirmada_compra
+            and
+            pullback_c
         ):
 
             score = calcular_score_compra(
@@ -1272,7 +1285,7 @@ def analizar():
                 di_minus
             )
 
-            resultado = crear_compra_confirmada(
+            resultado = confirmacion_compra(
                 precio,
                 atr,
                 score,
@@ -1286,12 +1299,36 @@ def analizar():
                 ema50
             )
 
-            estado["direccion_pendiente"] = None
-            estado["id_pendiente"] = None
-            estado["ultima_confirmacion"] = time.time()
+            estado["confirmacion_activa"] = (
+                "COMPRA"
+            )
+
+            estado["entrada_confirmada"] = (
+                precio
+            )
+
+            estado["atr_confirmacion"] = (
+                atr
+            )
+
+            estado["hora_confirmacion"] = (
+                time.time()
+            )
+
+            estado["ultima_confirmacion"] = (
+                time.time()
+            )
+
+            estado["direccion_pendiente"] = (
+                None
+            )
+
+            estado["id_pendiente"] = (
+                None
+            )
 
             print(
-                "🟢 COMPRA CONFIRMADA"
+                "🟢 COMPRA CONFIRMADA + PULLBACK"
             )
 
             return resultado
@@ -1305,6 +1342,8 @@ def analizar():
             == "VENTA"
             and
             confirmada_venta
+            and
+            pullback_v
         ):
 
             score = calcular_score_venta(
@@ -1319,7 +1358,7 @@ def analizar():
                 di_minus
             )
 
-            resultado = crear_venta_confirmada(
+            resultado = confirmacion_venta(
                 precio,
                 atr,
                 score,
@@ -1333,12 +1372,36 @@ def analizar():
                 ema50
             )
 
-            estado["direccion_pendiente"] = None
-            estado["id_pendiente"] = None
-            estado["ultima_confirmacion"] = time.time()
+            estado["confirmacion_activa"] = (
+                "VENTA"
+            )
+
+            estado["entrada_confirmada"] = (
+                precio
+            )
+
+            estado["atr_confirmacion"] = (
+                atr
+            )
+
+            estado["hora_confirmacion"] = (
+                time.time()
+            )
+
+            estado["ultima_confirmacion"] = (
+                time.time()
+            )
+
+            estado["direccion_pendiente"] = (
+                None
+            )
+
+            estado["id_pendiente"] = (
+                None
+            )
 
             print(
-                "🔴 VENTA CONFIRMADA"
+                "🔴 VENTA CONFIRMADA + PULLBACK"
             )
 
             return resultado
@@ -1359,12 +1422,7 @@ def analizar():
                 ema50
             ):
 
-                print(
-                    "🔴 PREALERTA COMPRA DESCARTADA"
-                )
-
-                estado["direccion_pendiente"] = None
-                estado["id_pendiente"] = None
+                limpiar_pendiente()
 
                 return {
                     "tipo": "DESCARTADA",
@@ -1377,17 +1435,11 @@ def analizar():
                     )
                 }
 
-            print(
-                "🔎 COMPRA PENDIENTE"
-            )
-
-            print(
-                "⏳ Esperando confirmación..."
-            )
-
             return {
                 "tipo": "SIN_SEÑAL",
-                "mensaje": "🔎 Compra pendiente..."
+                "mensaje": (
+                    "🔎 Compra pendiente..."
+                )
             }
 
         # ====================================================
@@ -1406,12 +1458,7 @@ def analizar():
                 ema50
             ):
 
-                print(
-                    "🟢 PREALERTA VENTA DESCARTADA"
-                )
-
-                estado["direccion_pendiente"] = None
-                estado["id_pendiente"] = None
+                limpiar_pendiente()
 
                 return {
                     "tipo": "DESCARTADA",
@@ -1424,45 +1471,27 @@ def analizar():
                     )
                 }
 
-            print(
-                "🔎 VENTA PENDIENTE"
-            )
-
-            print(
-                "⏳ Esperando confirmación..."
-            )
-
             return {
                 "tipo": "SIN_SEÑAL",
-                "mensaje": "🔎 Venta pendiente..."
+                "mensaje": (
+                    "🔎 Venta pendiente..."
+                )
             }
 
         # ====================================================
         # NUEVA PREALERTA COMPRA
         # ====================================================
 
-        if posible_compra:
+        ahora = time.time()
 
-            ahora = time.time()
-
-            if (
-                ahora -
-                estado["ultima_prealerta"]
-                <
-                MINUTOS_REPETICION * 60
-            ):
-
-                print(
-                    "⏳ Prealerta compra bloqueada "
-                    "por cooldown"
-                )
-
-                return {
-                    "tipo": "SIN_SEÑAL",
-                    "mensaje": (
-                        "⏳ Esperando confirmación..."
-                    )
-                }
+        if (
+            posible_compra
+            and
+            ahora -
+            estado["ultima_prealerta"]
+            >=
+            MINUTOS_REPETICION * 60
+        ):
 
             score = calcular_score_compra(
                 tendencia5,
@@ -1476,7 +1505,7 @@ def analizar():
                 di_minus
             )
 
-            resultado = crear_prealerta_compra(
+            resultado = prealerta_compra(
                 precio,
                 atr,
                 score,
@@ -1490,9 +1519,17 @@ def analizar():
                 ema50
             )
 
-            estado["direccion_pendiente"] = "COMPRA"
-            estado["id_pendiente"] = resultado["id"]
-            estado["ultima_prealerta"] = ahora
+            estado["direccion_pendiente"] = (
+                "COMPRA"
+            )
+
+            estado["id_pendiente"] = (
+                resultado["id"]
+            )
+
+            estado["ultima_prealerta"] = (
+                ahora
+            )
 
             print(
                 "🟡 NUEVA PREALERTA COMPRA"
@@ -1504,28 +1541,14 @@ def analizar():
         # NUEVA PREALERTA VENTA
         # ====================================================
 
-        if posible_venta:
-
-            ahora = time.time()
-
-            if (
-                ahora -
-                estado["ultima_prealerta"]
-                <
-                MINUTOS_REPETICION * 60
-            ):
-
-                print(
-                    "⏳ Prealerta venta bloqueada "
-                    "por cooldown"
-                )
-
-                return {
-                    "tipo": "SIN_SEÑAL",
-                    "mensaje": (
-                        "⏳ Esperando confirmación..."
-                    )
-                }
+        if (
+            posible_venta
+            and
+            ahora -
+            estado["ultima_prealerta"]
+            >=
+            MINUTOS_REPETICION * 60
+        ):
 
             score = calcular_score_venta(
                 tendencia5,
@@ -1539,7 +1562,7 @@ def analizar():
                 di_minus
             )
 
-            resultado = crear_prealerta_venta(
+            resultado = prealerta_venta(
                 precio,
                 atr,
                 score,
@@ -1553,9 +1576,17 @@ def analizar():
                 ema50
             )
 
-            estado["direccion_pendiente"] = "VENTA"
-            estado["id_pendiente"] = resultado["id"]
-            estado["ultima_prealerta"] = ahora
+            estado["direccion_pendiente"] = (
+                "VENTA"
+            )
+
+            estado["id_pendiente"] = (
+                resultado["id"]
+            )
+
+            estado["ultima_prealerta"] = (
+                ahora
+            )
 
             print(
                 "🟡 NUEVA PREALERTA VENTA"
@@ -1583,7 +1614,7 @@ def analizar():
     except Exception as e:
 
         print(
-            f"❌ ERROR STRATEGY V3.4: {e}"
+            f"❌ ERROR STRATEGY V3.4.1: {e}"
         )
 
         return {
@@ -1591,4 +1622,4 @@ def analizar():
             "mensaje": (
                 f"❌ Error estrategia: {e}"
             )
-            }
+    }
