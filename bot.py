@@ -14,15 +14,13 @@ from telegram.ext import (
     ContextTypes,
 )
 
-from strategy import (
-    analizar,
-    reiniciar_estado
-)
+from strategy import analizar
 
 
 # =========================================================
-# XAU SNIPER AI V3.4.1
+# XAU SNIPER AI V4.0
 # =========================================================
+
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
@@ -82,41 +80,33 @@ def teclado():
 async def inicio(application):
 
     global bot_encendido
-    global ultima_senal
 
     bot_encendido = False
-    ultima_senal = None
-
-    reiniciar_estado()
 
     print(
-        "🚀 XAU SNIPER AI V3.4.1 "
+        "🚀 XAU SNIPER AI V4.0 "
         "iniciado correctamente"
     )
 
     await application.bot.send_message(
         chat_id=CHAT_ID,
         text=(
-            "🚀 XAU Sniper AI V3.4.1 "
-            "iniciado correctamente.\n\n"
+            "🚀 XAU SNIPER AI V4.0\n\n"
             "✅ Conexión Telegram: OK\n"
             "✅ Motor de análisis: OK\n"
             "📊 Mercado: XAU/USD\n"
             "⏱ Revisión: cada 100 segundos\n\n"
-            "🔴 Estado: APAGADO\n"
-            "⚠️ Pulsa ▶️ ENCENDER "
-            "para comenzar."
+            "🔴 Estado: APAGADO\n\n"
+            "🧠 Motor:\n"
+            "Estructura + Impulso + "
+            "Pullback + Continuación\n\n"
+            "⚠️ Modo: PAPER / ESCÁNER"
         ),
         reply_markup=teclado()
     )
 
     print(
         "✅ Mensaje de inicio enviado"
-    )
-
-    print(
-        "⏱️ Analizador programado "
-        "cada 100 segundos"
     )
 
 
@@ -146,7 +136,7 @@ async def ejecutar_analisis(
         )
 
         print(
-            "🔍 Analizando..."
+            "🔍 Analizando XAU/USD..."
         )
 
         resultado = analizar()
@@ -196,10 +186,6 @@ async def ejecutar_analisis(
 
         if tipo == "SIN_SEÑAL":
 
-            print(
-                "😴 Sin señal"
-            )
-
             return
 
         # -------------------------------------------------
@@ -208,13 +194,10 @@ async def ejecutar_analisis(
 
         if tipo == "ERROR":
 
-            print(
-                "❌ Error de estrategia"
-            )
-
             await context.bot.send_message(
                 chat_id=CHAT_ID,
-                text=mensaje
+                text=mensaje,
+                reply_markup=teclado()
             )
 
             return
@@ -233,7 +216,7 @@ async def ejecutar_analisis(
             return
 
         # -------------------------------------------------
-        # ENVIAR TELEGRAM
+        # TELEGRAM
         # -------------------------------------------------
 
         await context.bot.send_message(
@@ -245,8 +228,7 @@ async def ejecutar_analisis(
         ultima_senal = mensaje
 
         print(
-            f"✅ {tipo} enviada "
-            "a Telegram"
+            f"✅ {tipo} enviada a Telegram"
         )
 
     except Exception as e:
@@ -260,10 +242,10 @@ async def ejecutar_analisis(
             await context.bot.send_message(
                 chat_id=CHAT_ID,
                 text=(
-                    "❌ Error en "
-                    "XAU Sniper AI V3.4.1\n\n"
+                    "❌ ERROR XAU SNIPER V4.0\n\n"
                     f"{e}"
-                )
+                ),
+                reply_markup=teclado()
             )
 
         except Exception as telegram_error:
@@ -284,28 +266,48 @@ async def botones(
 ):
 
     global bot_encendido
-    global ultima_senal
 
     query = update.callback_query
 
     await query.answer()
 
-    # -----------------------------------------------------
+    # =====================================================
     # ENCENDER
-    # -----------------------------------------------------
+    # =====================================================
 
     if query.data == "encender":
 
+        if bot_encendido:
+
+            await context.bot.send_message(
+                chat_id=CHAT_ID,
+                text=(
+                    "🟢 XAU SNIPER AI V4.0\n\n"
+                    "▶️ El bot ya está ENCENDIDO.\n\n"
+                    "🔍 El escáner continúa "
+                    "analizando XAU/USD."
+                ),
+                reply_markup=teclado()
+            )
+
+            return
+
         bot_encendido = True
 
-        await query.edit_message_text(
+        # NUEVO MENSAJE.
+        # NO editamos el anterior.
+
+        await context.bot.send_message(
+            chat_id=CHAT_ID,
             text=(
-                "🟢 XAU SNIPER AI V3.4.1\n\n"
+                "🟢 XAU SNIPER AI V4.0\n\n"
                 "▶️ BOT ENCENDIDO\n\n"
                 "🔍 Analizando XAU/USD\n"
-                "⏱ Cada 100 segundos\n"
-                "🛡️ Filtro de entrada tardía ACTIVO\n"
-                "📏 Zona de entrada por ATR ACTIVA"
+                "⏱ Cada 100 segundos\n\n"
+                "🧠 Lectura principal:\n"
+                "Estructura → Impulso → "
+                "Pullback → Continuación\n\n"
+                "⚠️ Modo: PAPER / ESCÁNER"
             ),
             reply_markup=teclado()
         )
@@ -314,25 +316,39 @@ async def botones(
             "🟢 BOT ENCENDIDO"
         )
 
-    # -----------------------------------------------------
+    # =====================================================
     # APAGAR
-    # -----------------------------------------------------
+    # =====================================================
 
     elif query.data == "apagar":
 
+        if not bot_encendido:
+
+            await context.bot.send_message(
+                chat_id=CHAT_ID,
+                text=(
+                    "🔴 XAU SNIPER AI V4.0\n\n"
+                    "⏹ El bot ya está APAGADO.\n\n"
+                    "El análisis permanece detenido."
+                ),
+                reply_markup=teclado()
+            )
+
+            return
+
         bot_encendido = False
 
-        reiniciar_estado()
+        # NUEVO MENSAJE.
+        # NO editamos el anterior.
 
-        ultima_senal = None
-
-        await query.edit_message_text(
+        await context.bot.send_message(
+            chat_id=CHAT_ID,
             text=(
-                "🔴 XAU SNIPER AI V3.4.1\n\n"
+                "🔴 XAU SNIPER AI V4.0\n\n"
                 "⏹ BOT APAGADO\n\n"
-                "El análisis está detenido.\n"
+                "El análisis está detenido.\n\n"
                 "Pulsa ▶️ ENCENDER "
-                "para comenzar."
+                "para continuar."
             ),
             reply_markup=teclado()
         )
@@ -357,12 +373,13 @@ async def start(
 
     await update.message.reply_text(
         (
-            "🥇 XAU SNIPER AI V3.4.1\n\n"
+            "🥇 XAU SNIPER AI V4.0\n\n"
             "🟢 Bot encendido\n"
             "📊 Mercado: XAU/USD\n"
             "⏱ Análisis: cada 100 segundos\n\n"
-            "🛡️ Filtro de entrada tardía: ACTIVO\n"
-            "📏 Zona de entrada por ATR: ACTIVA\n\n"
+            "🧠 Estructura + Movimiento\n"
+            "🚀 Impulso + Pullback\n"
+            "💥 Continuación\n\n"
             "🔍 Buscando oportunidades..."
         ),
         reply_markup=teclado()
@@ -392,12 +409,14 @@ async def status(
 
     await update.message.reply_text(
         (
-            "📊 XAU SNIPER AI V3.4.1\n\n"
+            "📊 XAU SNIPER AI V4.0\n\n"
             f"Estado: {estado_actual}\n"
             "📈 Mercado: XAU/USD\n"
-            "⏱ Intervalo: 100 segundos\n"
-            "🛡️ Filtro de entrada tardía: ACTIVO\n"
-            "📏 Zona de entrada por ATR: ACTIVA"
+            "⏱ Intervalo: 100 segundos\n\n"
+            "🧠 Motor:\n"
+            "Estructura + Impulso + "
+            "Pullback + Continuación\n\n"
+            "⚠️ Modo: PAPER / ESCÁNER"
         ),
         reply_markup=teclado()
     )
@@ -410,7 +429,7 @@ async def status(
 def main():
 
     # -----------------------------------------------------
-    # VALIDAR VARIABLES
+    # VARIABLES
     # -----------------------------------------------------
 
     if not BOT_TOKEN:
@@ -426,8 +445,7 @@ def main():
         )
 
     print(
-        "🚀 Iniciando "
-        "XAU SNIPER AI V3.4.1..."
+        "🚀 Iniciando XAU SNIPER AI V4.0..."
     )
 
     print(
@@ -439,7 +457,7 @@ def main():
     )
 
     print(
-        "🛡️ Filtro de entrada tardía: ACTIVO"
+        "🧠 Motor V4: estructura y movimiento"
     )
 
     # -----------------------------------------------------
@@ -482,26 +500,26 @@ def main():
     )
 
     # -----------------------------------------------------
-    # JOBQUEUE
+    # JOB QUEUE
     # -----------------------------------------------------
 
     if application.job_queue is None:
 
         raise RuntimeError(
-            "❌ JobQueue no disponible. "
-            "Instala "
-            "python-telegram-bot[job-queue]."
+            "❌ JobQueue no disponible.\n"
+            "Instala:\n"
+            "python-telegram-bot[job-queue]==22.2"
         )
 
     application.job_queue.run_repeating(
         ejecutar_analisis,
         interval=INTERVALO,
         first=5,
-        name="analizador_xau"
+        name="analizador_xau_v4"
     )
 
     print(
-        "✅ Analizador programado correctamente"
+        "✅ Analizador programado"
     )
 
     print(
