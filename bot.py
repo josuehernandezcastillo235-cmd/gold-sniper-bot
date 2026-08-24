@@ -21,7 +21,6 @@ from strategy import analizar
 # XAU SNIPER AI V4.0
 # =========================================================
 
-
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
@@ -29,7 +28,7 @@ INTERVALO = 100
 
 
 # =========================================================
-# ESTADO
+# ESTADO DEL BOT
 # =========================================================
 
 bot_encendido = False
@@ -74,7 +73,76 @@ def teclado():
 
 
 # =========================================================
-# INICIO
+# BOTONES
+# =========================================================
+
+async def botones(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
+    global bot_encendido
+
+    query = update.callback_query
+
+    await query.answer()
+
+    # -----------------------------------------------------
+    # ENCENDER
+    # -----------------------------------------------------
+
+    if query.data == "encender":
+
+        bot_encendido = True
+
+        await query.message.reply_text(
+            (
+                "🟢 XAU SNIPER AI V4.0\n\n"
+                "▶️ BOT ENCENDIDO\n\n"
+                "🔍 Analizando XAU/USD...\n"
+                "🧠 Estructura + Movimiento\n"
+                "🚀 Impulso + Pullback\n"
+                "💥 Continuación\n\n"
+                "⏱ Próximo análisis automático."
+            ),
+            reply_markup=teclado()
+        )
+
+        print(
+            "🟢 BOT ENCENDIDO"
+        )
+
+        return
+
+    # -----------------------------------------------------
+    # APAGAR
+    # -----------------------------------------------------
+
+    if query.data == "apagar":
+
+        bot_encendido = False
+
+        await query.message.reply_text(
+            (
+                "🔴 XAU SNIPER AI V4.0\n\n"
+                "⏹ BOT APAGADO\n\n"
+                "El análisis automático "
+                "queda detenido.\n\n"
+                "Pulsa ▶️ ENCENDER "
+                "para continuar."
+            ),
+            reply_markup=teclado()
+        )
+
+        print(
+            "🔴 BOT APAGADO"
+        )
+
+        return
+
+
+# =========================================================
+# INICIO DE APLICACIÓN
 # =========================================================
 
 async def inicio(application):
@@ -92,14 +160,14 @@ async def inicio(application):
         chat_id=CHAT_ID,
         text=(
             "🚀 XAU SNIPER AI V4.0\n\n"
-            "✅ Conexión Telegram: OK\n"
-            "✅ Motor de análisis: OK\n"
+            "✅ Telegram: OK\n"
+            "✅ Motor V4: OK\n"
             "📊 Mercado: XAU/USD\n"
             "⏱ Revisión: cada 100 segundos\n\n"
             "🔴 Estado: APAGADO\n\n"
             "🧠 Motor:\n"
-            "Estructura + Impulso + "
-            "Pullback + Continuación\n\n"
+            "Estructura → Impulso → "
+            "Pullback → Continuación\n\n"
             "⚠️ Modo: PAPER / ESCÁNER"
         ),
         reply_markup=teclado()
@@ -120,6 +188,10 @@ async def ejecutar_analisis(
 
     global ultima_senal
 
+    # -----------------------------------------------------
+    # BOT APAGADO
+    # -----------------------------------------------------
+
     if not bot_encendido:
 
         print(
@@ -131,12 +203,15 @@ async def ejecutar_analisis(
 
     try:
 
+        print("")
         print(
             "==================================="
         )
-
         print(
-            "🔍 Analizando XAU/USD..."
+            "🔍 ANALIZANDO XAU/USD..."
+        )
+        print(
+            "==================================="
         )
 
         resultado = analizar()
@@ -158,7 +233,9 @@ async def ejecutar_analisis(
                 "⚠️ Resultado inesperado:"
             )
 
-            print(resultado)
+            print(
+                resultado
+            )
 
             return
 
@@ -206,17 +283,26 @@ async def ejecutar_analisis(
         # EVITAR DUPLICADOS
         # -------------------------------------------------
 
-        if mensaje == ultima_senal:
+        identificador = (
+            resultado.get("id")
+        )
+
+        if (
+            identificador
+            and
+            identificador
+            == ultima_senal
+        ):
 
             print(
-                "♻️ Señal idéntica. "
+                "♻️ Señal duplicada. "
                 "No se envía."
             )
 
             return
 
         # -------------------------------------------------
-        # TELEGRAM
+        # ENVIAR SEÑAL
         # -------------------------------------------------
 
         await context.bot.send_message(
@@ -225,136 +311,24 @@ async def ejecutar_analisis(
             reply_markup=teclado()
         )
 
-        ultima_senal = mensaje
+        if identificador:
+
+            ultima_senal = (
+                identificador
+            )
 
         print(
-            f"✅ {tipo} enviada a Telegram"
+            "📨 Señal enviada a Telegram"
         )
 
     except Exception as e:
 
-        print(
-            f"❌ ERROR EN ANÁLISIS: {e}"
-        )
-
-        try:
-
-            await context.bot.send_message(
-                chat_id=CHAT_ID,
-                text=(
-                    "❌ ERROR XAU SNIPER V4.0\n\n"
-                    f"{e}"
-                ),
-                reply_markup=teclado()
-            )
-
-        except Exception as telegram_error:
-
-            print(
-                "❌ Error enviando error "
-                f"a Telegram: {telegram_error}"
-            )
-
-
-# =========================================================
-# BOTONES
-# =========================================================
-
-async def botones(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
-
-    global bot_encendido
-
-    query = update.callback_query
-
-    await query.answer()
-
-    # =====================================================
-    # ENCENDER
-    # =====================================================
-
-    if query.data == "encender":
-
-        if bot_encendido:
-
-            await context.bot.send_message(
-                chat_id=CHAT_ID,
-                text=(
-                    "🟢 XAU SNIPER AI V4.0\n\n"
-                    "▶️ El bot ya está ENCENDIDO.\n\n"
-                    "🔍 El escáner continúa "
-                    "analizando XAU/USD."
-                ),
-                reply_markup=teclado()
-            )
-
-            return
-
-        bot_encendido = True
-
-        # NUEVO MENSAJE.
-        # NO editamos el anterior.
-
-        await context.bot.send_message(
-            chat_id=CHAT_ID,
-            text=(
-                "🟢 XAU SNIPER AI V4.0\n\n"
-                "▶️ BOT ENCENDIDO\n\n"
-                "🔍 Analizando XAU/USD\n"
-                "⏱ Cada 100 segundos\n\n"
-                "🧠 Lectura principal:\n"
-                "Estructura → Impulso → "
-                "Pullback → Continuación\n\n"
-                "⚠️ Modo: PAPER / ESCÁNER"
-            ),
-            reply_markup=teclado()
+        logger.exception(
+            "❌ Error en ejecutar_analisis"
         )
 
         print(
-            "🟢 BOT ENCENDIDO"
-        )
-
-    # =====================================================
-    # APAGAR
-    # =====================================================
-
-    elif query.data == "apagar":
-
-        if not bot_encendido:
-
-            await context.bot.send_message(
-                chat_id=CHAT_ID,
-                text=(
-                    "🔴 XAU SNIPER AI V4.0\n\n"
-                    "⏹ El bot ya está APAGADO.\n\n"
-                    "El análisis permanece detenido."
-                ),
-                reply_markup=teclado()
-            )
-
-            return
-
-        bot_encendido = False
-
-        # NUEVO MENSAJE.
-        # NO editamos el anterior.
-
-        await context.bot.send_message(
-            chat_id=CHAT_ID,
-            text=(
-                "🔴 XAU SNIPER AI V4.0\n\n"
-                "⏹ BOT APAGADO\n\n"
-                "El análisis está detenido.\n\n"
-                "Pulsa ▶️ ENCENDER "
-                "para continuar."
-            ),
-            reply_markup=teclado()
-        )
-
-        print(
-            "🔴 BOT APAGADO"
+            f"❌ ERROR BOT: {e}"
         )
 
 
@@ -374,7 +348,7 @@ async def start(
     await update.message.reply_text(
         (
             "🥇 XAU SNIPER AI V4.0\n\n"
-            "🟢 Bot encendido\n"
+            "🟢 BOT ENCENDIDO\n\n"
             "📊 Mercado: XAU/USD\n"
             "⏱ Análisis: cada 100 segundos\n\n"
             "🧠 Estructura + Movimiento\n"
@@ -401,11 +375,15 @@ async def status(
 
     if bot_encendido:
 
-        estado_actual = "🟢 ENCENDIDO"
+        estado_actual = (
+            "🟢 ENCENDIDO"
+        )
 
     else:
 
-        estado_actual = "🔴 APAGADO"
+        estado_actual = (
+            "🔴 APAGADO"
+        )
 
     await update.message.reply_text(
         (
@@ -457,7 +435,7 @@ def main():
     )
 
     print(
-        "🧠 Motor V4: estructura y movimiento"
+        "🧠 Motor V4: estructura + movimiento"
     )
 
     # -----------------------------------------------------
