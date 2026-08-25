@@ -10,7 +10,7 @@ from ta.volatility import AverageTrueRange
 
 
 # ============================================================
-# XAU SNIPER AI V4.2
+# XAU SNIPER AI V4.2.1
 # MOTOR DE ESTRUCTURA + MOMENTUM + LIQUIDEZ
 #
 # RÉGIMEN
@@ -36,6 +36,9 @@ from ta.volatility import AverageTrueRange
 # PREALERTA
 # ↓
 # CONFIRMACIÓN / DESCARTADA
+#
+# V4.2.1
+# OPTIMIZACIÓN DE CONSUMO TWELVE DATA
 # ============================================================
 
 
@@ -46,7 +49,30 @@ SYMBOL = "XAU/USD"
 INTERVALO_5M = "5min"
 INTERVALO_15M = "15min"
 
-INTERVALO_ANALISIS = 100
+
+# ============================================================
+# CONFIGURACIÓN DE DATOS / API
+# ============================================================
+
+# La estrategia necesita al menos 220 velas
+# para calcular EMA200.
+#
+# Dejamos margen suficiente sin pedir 500 velas.
+OUTPUTSIZE_5M = 250
+OUTPUTSIZE_15M = 250
+
+# Un análisis cada 5 minutos.
+#
+# La estrategia utiliza velas cerradas de 5M,
+# por lo que analizar cada 100 segundos provocaba
+# peticiones repetidas sin necesidad.
+INTERVALO_ANALISIS = 300
+
+# Timeout de cada petición HTTP.
+TIMEOUT_API = 15
+
+# Máximo de intentos por petición.
+MAX_INTENTOS_API = 2
 
 
 # ============================================================
@@ -266,38 +292,60 @@ def obtener_datos(intervalo):
 
     url = "https://api.twelvedata.com/time_series"
 
+    if intervalo == INTERVALO_5M:
+
+        outputsize = OUTPUTSIZE_5M
+
+    elif intervalo == INTERVALO_15M:
+
+        outputsize = OUTPUTSIZE_15M
+
+    else:
+
+        outputsize = 250
+
     params = {
         "symbol": SYMBOL,
         "interval": intervalo,
-        "outputsize": 500,
+        "outputsize": outputsize,
         "apikey": API_KEY,
         "format": "JSON"
     }
 
-    max_intentos = 4
-
-    for intento in range(1, max_intentos + 1):
+    for intento in range(1, MAX_INTENTOS_API + 1):
 
         try:
 
             respuesta = requests.get(
                 url,
                 params=params,
-                timeout=20
+                timeout=TIMEOUT_API
             )
+
+            # =================================================
+            # RATE LIMIT
+            # =================================================
 
             if respuesta.status_code == 429:
 
-                espera = min(
-                    15,
-                    3 * intento
-                )
-
                 print(
                     f"⚠️ Twelve Data 429 "
-                    f"({intervalo}) | "
-                    f"reintento {intento}/{max_intentos} "
-                    f"en {espera}s"
+                    f"| {intervalo} "
+                    f"| intento {intento}/{MAX_INTENTOS_API}"
+                )
+
+                if intento >= MAX_INTENTOS_API:
+
+                    raise Exception(
+                        f"Twelve Data 429 "
+                        f"después de {MAX_INTENTOS_API} intentos."
+                    )
+
+                espera = 8 * intento
+
+                print(
+                    f"⏸️ Esperando {espera}s "
+                    f"antes del último reintento..."
                 )
 
                 time.sleep(espera)
@@ -316,14 +364,13 @@ def obtener_datos(intervalo):
 
             if data.get("status") == "error":
 
+                mensaje = data.get(
+                    "message",
+                    "Error desconocido"
+                )
+
                 raise Exception(
-                    "Twelve Data: " +
-                    str(
-                        data.get(
-                            "message",
-                            "Error desconocido"
-                        )
-                    )
+                    f"Twelve Data: {mensaje}"
                 )
 
             if "values" not in data:
@@ -340,11 +387,12 @@ def obtener_datos(intervalo):
                     "Campo values inválido."
                 )
 
-            if len(values) < 50:
+            if len(values) < 220:
 
                 raise Exception(
                     f"Datos insuficientes "
-                    f"{intervalo}: {len(values)} velas."
+                    f"{intervalo}: "
+                    f"{len(values)} velas."
                 )
 
             df = pd.DataFrame(values)
@@ -358,7 +406,8 @@ def obtener_datos(intervalo):
             ]
 
             faltantes = [
-                c for c in columnas
+                c
+                for c in columnas
                 if c not in df.columns
             ]
 
@@ -395,15 +444,19 @@ def obtener_datos(intervalo):
                 ]
             )
 
-            df = df.sort_values("datetime")
+            df = df.sort_values(
+                "datetime"
+            )
 
             df = df.drop_duplicates(
                 subset=["datetime"]
             )
 
-            df = df.reset_index(drop=True)
+            df = df.reset_index(
+                drop=True
+            )
 
-            if len(df) < 50:
+            if len(df) < 220:
 
                 raise Exception(
                     f"Después de limpiar quedaron "
@@ -419,42 +472,44 @@ def obtener_datos(intervalo):
 
         except requests.exceptions.Timeout:
 
-            if intento >= max_intentos:
+            print(
+                f"⚠️ Timeout Twelve Data "
+                f"{intervalo} "
+                f"| intento {intento}/{MAX_INTENTOS_API}"
+            )
+
+            if intento >= MAX_INTENTOS_API:
 
                 raise Exception(
                     f"Timeout Twelve Data "
-                    f"después de {max_intentos} intentos."
+                    f"{intervalo} después de "
+                    f"{MAX_INTENTOS_API} intentos."
                 )
 
-            espera = 2 * intento
-
-            print(
-                f"⚠️ Timeout {intervalo}. "
-                f"Reintentando en {espera}s..."
-            )
+            espera = 3 * intento
 
             time.sleep(espera)
 
         except requests.exceptions.RequestException as e:
 
-            if intento >= max_intentos:
+            print(
+                f"⚠️ Error HTTP Twelve Data "
+                f"{intervalo}: {e}"
+            )
+
+            if intento >= MAX_INTENTOS_API:
 
                 raise Exception(
                     f"Error HTTP Twelve Data: {e}"
                 )
 
-            espera = 2 * intento
-
-            print(
-                f"⚠️ Error HTTP {intervalo}: "
-                f"{e}. Reintentando..."
-            )
+            espera = 3 * intento
 
             time.sleep(espera)
 
     raise Exception(
         f"No se pudieron obtener datos {intervalo}"
-    )
+)
 
 
 # ============================================================
@@ -513,15 +568,19 @@ def calcular_indicadores(df):
     )
 
     df["adx"] = adx.adx()
+
     df["di_plus"] = adx.adx_pos()
+
     df["di_minus"] = adx.adx_neg()
 
     df["cuerpo"] = (
-        df["close"] - df["open"]
+        df["close"] -
+        df["open"]
     ).abs()
 
     df["rango"] = (
-        df["high"] - df["low"]
+        df["high"] -
+        df["low"]
     )
 
     df["direccion_vela"] = 0
@@ -640,6 +699,7 @@ def velas_cerradas(df):
 def detectar_swings(df):
 
     highs = []
+
     lows = []
 
     if df is None or len(df) < 10:
@@ -650,7 +710,10 @@ def detectar_swings(df):
 
     final = len(df) - SWING_RIGHT
 
-    for i in range(inicio, final):
+    for i in range(
+        inicio,
+        final
+    ):
 
         try:
 
@@ -667,6 +730,7 @@ def detectar_swings(df):
             )
 
             if atr <= 0:
+
                 continue
 
             altos_izq = df.iloc[
@@ -777,6 +841,7 @@ def analizar_estructura(df):
     if len(highs) >= 2:
 
         resultado["ultimo_high"] = highs[-1]
+
         resultado["prev_high"] = highs[-2]
 
         resultado["hh"] = (
@@ -796,6 +861,7 @@ def analizar_estructura(df):
     if len(lows) >= 2:
 
         resultado["ultimo_low"] = lows[-1]
+
         resultado["prev_low"] = lows[-2]
 
         resultado["hl"] = (
@@ -813,6 +879,7 @@ def analizar_estructura(df):
         )
 
     alcistas = 0
+
     bajistas = 0
 
     if resultado["hh"]:
@@ -830,11 +897,13 @@ def analizar_estructura(df):
     if alcistas >= 2:
 
         resultado["direccion"] = "ALCISTA"
+
         resultado["fuerza"] = alcistas
 
     elif bajistas >= 2:
 
         resultado["direccion"] = "BAJISTA"
+
         resultado["fuerza"] = bajistas
 
     else:
@@ -861,16 +930,14 @@ def analizar_estructura(df):
             if desplazamiento > atr * 0.50:
 
                 resultado["direccion"] = "ALCISTA"
+
                 resultado["fuerza"] = 1
 
             elif desplazamiento < -atr * 0.50:
 
                 resultado["direccion"] = "BAJISTA"
-                resultado["fuerza"] = 1
 
-    # ========================================================
-    # PRECIO ACTUAL
-    # ========================================================
+                resultado["fuerza"] = 1
 
     precio_actual = float(
         df.iloc[-1]["close"]
@@ -886,9 +953,6 @@ def analizar_estructura(df):
 
     # ========================================================
     # BOS
-    #
-    # Usamos swing confirmado.
-    # Además exigimos cierre + buffer ATR.
     # ========================================================
 
     if resultado["ultimo_high"] is not None:
@@ -923,9 +987,6 @@ def analizar_estructura(df):
 
     # ========================================================
     # CHoCH
-    #
-    # No basta con tocar el swing.
-    # Necesitamos cierre estructural + desplazamiento mínimo.
     # ========================================================
 
     if resultado["direccion"] == "ALCISTA":
@@ -985,15 +1046,25 @@ def detectar_regimen(df):
 
     try:
 
-        precio = float(actual["close"])
+        precio = float(
+            actual["close"]
+        )
 
-        ema20 = float(actual["ema20"])
+        ema20 = float(
+            actual["ema20"]
+        )
 
-        ema50 = float(actual["ema50"])
+        ema50 = float(
+            actual["ema50"]
+        )
 
-        ema200 = float(actual["ema200"])
+        ema200 = float(
+            actual["ema200"]
+        )
 
-        adx = float(actual["adx"])
+        adx = float(
+            actual["adx"]
+        )
 
         pendiente20 = float(
             actual["pendiente_ema20"]
@@ -1004,12 +1075,22 @@ def detectar_regimen(df):
         )
 
         rango20 = (
-            float(df["high"].iloc[-20:].max())
+            float(
+                df["high"]
+                .iloc[-20:]
+                .max()
+            )
             -
-            float(df["low"].iloc[-20:].min())
+            float(
+                df["low"]
+                .iloc[-20:]
+                .min()
+            )
         )
 
-        atr = float(actual["atr"])
+        atr = float(
+            actual["atr"]
+        )
 
     except Exception:
 
@@ -1073,7 +1154,9 @@ def obtener_contexto_15m(
     df15
 ):
 
-    regimen15 = detectar_regimen(df15)
+    regimen15 = detectar_regimen(
+        df15
+    )
 
     direccion = estructura15.get(
         "direccion",
@@ -1156,17 +1239,16 @@ def evaluar_calidad_impulso(
         )
 
         cambio = (
-            float(ventana.iloc[-1]["close"]) -
-            float(ventana.iloc[0]["close"])
+            float(
+                ventana.iloc[-1]["close"]
+            )
+            -
+            float(
+                ventana.iloc[0]["close"]
+            )
         )
 
-        if direccion == "BAJISTA":
-
-            cambio = abs(cambio)
-
-        else:
-
-            cambio = abs(cambio)
+        cambio = abs(cambio)
 
         rango_total = float(
             ventana["rango"].sum()
@@ -1253,9 +1335,6 @@ def evaluar_calidad_impulso(
 
 # ============================================================
 # IMPULSO ALCISTA
-#
-# Busca primero un extremo.
-# El impulso termina ANTES del pullback.
 # ============================================================
 
 def detectar_impulso_alcista(df):
@@ -1282,10 +1361,8 @@ def detectar_impulso_alcista(df):
 
             return None
 
-        # Dejamos mínimo 2 velas posteriores
-        # al extremo para que exista pullback.
         rango_extremos = datos.iloc[
-            : -PULLBACK_VELAS_MIN
+            :-PULLBACK_VELAS_MIN
         ]
 
         if len(rango_extremos) < 6:
@@ -1398,7 +1475,7 @@ def detectar_impulso_bajista(df):
             return None
 
         rango_extremos = datos.iloc[
-            : -PULLBACK_VELAS_MIN
+            :-PULLBACK_VELAS_MIN
         ]
 
         if len(rango_extremos) < 6:
@@ -1484,10 +1561,6 @@ def detectar_impulso_bajista(df):
 
 # ============================================================
 # PULLBACK ALCISTA
-#
-# IMPORTANTE:
-# El pullback empieza DESPUÉS del extremo del impulso.
-# Ya no se mezclan ambas fases.
 # ============================================================
 
 def detectar_pullback_alcista(
@@ -1517,10 +1590,10 @@ def detectar_pullback_alcista(
             impulso["indice_extremo"]
         )
 
-        # Como el índice viene de la ventana
-        # local del impulso, calculamos la posición
-        # absoluta aproximada.
-        inicio_ventana = len(df) - IMPULSO_LOOKBACK
+        inicio_ventana = (
+            len(df) -
+            IMPULSO_LOOKBACK
+        )
 
         indice_absoluto = (
             inicio_ventana +
@@ -1544,8 +1617,6 @@ def detectar_pullback_alcista(
 
         if cantidad > PULLBACK_VELAS_MAX:
 
-            # Usamos solamente las últimas
-            # velas permitidas del pullback.
             inicio_pullback = (
                 fin -
                 PULLBACK_VELAS_MAX
@@ -1615,8 +1686,6 @@ def detectar_pullback_alcista(
 
             return None
 
-        # El precio no debe haber destruido
-        # la base del impulso.
         if precio < (
             inicio -
             atr * 0.10
@@ -1624,9 +1693,6 @@ def detectar_pullback_alcista(
 
             return None
 
-        # Para una prealerta todavía no queremos
-        # que el precio haya confirmado la ruptura
-        # del extremo.
         if precio > (
             extremo +
             atr * 0.50
@@ -1699,7 +1765,10 @@ def detectar_pullback_bajista(
             impulso["indice_extremo"]
         )
 
-        inicio_ventana = len(df) - IMPULSO_LOOKBACK
+        inicio_ventana = (
+            len(df) -
+            IMPULSO_LOOKBACK
+        )
 
         indice_absoluto = (
             inicio_ventana +
@@ -1873,7 +1942,9 @@ def pullback_sano(
         if direccion == "ALCISTA":
 
             return (
-                float(df.iloc[-1]["close"])
+                float(
+                    df.iloc[-1]["close"]
+                )
                 >=
                 float(
                     pullback["inicio_impulso"]
@@ -1881,7 +1952,9 @@ def pullback_sano(
             )
 
         return (
-            float(df.iloc[-1]["close"])
+            float(
+                df.iloc[-1]["close"]
+            )
             <=
             float(
                 pullback["inicio_impulso"]
@@ -2201,8 +2274,6 @@ def detectar_liquidez(df):
             high_previo
         )
 
-        # Sweep de mínimos:
-        # rompe abajo y recupera arriba.
         resultado["sweep_alcista"] = (
             low_actual <
             low_previo - buffer
@@ -2211,8 +2282,6 @@ def detectar_liquidez(df):
             low_previo
         )
 
-        # Sweep de máximos:
-        # rompe arriba y recupera abajo.
         resultado["sweep_bajista"] = (
             high_actual >
             high_previo + buffer
@@ -2323,8 +2392,13 @@ def evaluar_momentum_compra(actual):
 
     try:
 
-        rsi = float(actual["rsi"])
-        adx = float(actual["adx"])
+        rsi = float(
+            actual["rsi"]
+        )
+
+        adx = float(
+            actual["adx"]
+        )
 
         di_plus = float(
             actual["di_plus"]
@@ -2380,8 +2454,13 @@ def evaluar_momentum_venta(actual):
 
     try:
 
-        rsi = float(actual["rsi"])
-        adx = float(actual["adx"])
+        rsi = float(
+            actual["rsi"]
+        )
+
+        adx = float(
+            actual["adx"]
+        )
 
         di_plus = float(
             actual["di_plus"]
@@ -2485,14 +2564,17 @@ def calcular_score_compra_v4(
         score += 10
 
         if impulso.get("calidad", 0) >= 5:
+
             score += 3
 
     # PULLBACK
     if pullback is not None:
+
         score += 8
 
     # CONTINUACIÓN
     if continuacion:
+
         score += 8
 
     # LIQUIDEZ
@@ -2500,10 +2582,12 @@ def calcular_score_compra_v4(
         "sweep_alcista",
         False
     ):
+
         score += 5
 
     # UBICACIÓN
     if ubicacion >= 2:
+
         score += 3
 
     # MOMENTUM
@@ -2513,15 +2597,19 @@ def calcular_score_compra_v4(
     )
 
     if rsi >= RSI_COMPRA_MIN:
+
         score += 2
 
     if di_plus > di_minus:
+
         score += 2
 
     if adx >= ADX_FUERTE:
+
         score += 2
 
     if ema20 > ema50:
+
         score += 2
 
     return min(
@@ -2556,27 +2644,35 @@ def calcular_score_venta_v4(
     score = 0
 
     if estructura.get("direccion") == "BAJISTA":
+
         score += 15
 
     if estructura.get("lh"):
+
         score += 5
 
     if estructura.get("ll"):
+
         score += 5
 
     if estructura.get("bos") == "BAJISTA":
+
         score += 8
 
     if contexto15 == "BAJISTA":
+
         score += 10
 
     elif contexto15 == "NEUTRAL":
+
         score += 4
 
     if regimen == "BAJISTA":
+
         score += 8
 
     elif regimen == "TRANSICION":
+
         score += 4
 
     if impulso is not None:
@@ -2584,21 +2680,26 @@ def calcular_score_venta_v4(
         score += 10
 
         if impulso.get("calidad", 0) >= 5:
+
             score += 3
 
     if pullback is not None:
+
         score += 8
 
     if continuacion:
+
         score += 8
 
     if liquidez.get(
         "sweep_bajista",
         False
     ):
+
         score += 5
 
     if ubicacion >= 2:
+
         score += 3
 
     score += min(
@@ -2607,21 +2708,25 @@ def calcular_score_venta_v4(
     )
 
     if rsi <= RSI_VENTA_MAX:
+
         score += 2
 
     if di_minus > di_plus:
+
         score += 2
 
     if adx >= ADX_FUERTE:
+
         score += 2
 
     if ema20 < ema50:
+
         score += 2
 
     return min(
         int(score),
         100
-    )
+        )
 
 
 # ============================================================
@@ -2693,9 +2798,13 @@ def crear_prealerta_compra(
             ),
 
         "precio": precio,
+
         "sl": sl,
+
         "tp": tp,
+
         "score": score,
+
         "atr": atr
     }
 
@@ -2769,9 +2878,13 @@ def crear_prealerta_venta(
             ),
 
         "precio": precio,
+
         "sl": sl,
+
         "tp": tp,
+
         "score": score,
+
         "atr": atr
     }
 
@@ -2829,9 +2942,13 @@ def crear_compra_confirmada(
             ),
 
         "precio": precio,
+
         "sl": sl,
+
         "tp": tp,
+
         "score": score,
+
         "atr": atr
     }
 
@@ -2889,9 +3006,13 @@ def crear_venta_confirmada(
             ),
 
         "precio": precio,
+
         "sl": sl,
+
         "tp": tp,
+
         "score": score,
+
         "atr": atr
     }
 
@@ -3145,7 +3266,101 @@ def validar_prealerta_venta(
 
 
 # ============================================================
-# ANALIZAR V4.2
+# UTILIDAD DE DIAGNÓSTICO
+# ============================================================
+
+def imprimir_resumen_datos(
+    df5,
+    df15
+):
+
+    try:
+
+        print("")
+        print("📡 DATOS RECIBIDOS")
+        print("-----------------------------------")
+
+        print(
+            f"5M: {len(df5)} velas"
+        )
+
+        print(
+            f"15M: {len(df15)} velas"
+        )
+
+        if not df5.empty:
+
+            print(
+                f"5M última vela: "
+                f"{df5.iloc[-1]['datetime']}"
+            )
+
+        if not df15.empty:
+
+            print(
+                f"15M última vela: "
+                f"{df15.iloc[-1]['datetime']}"
+            )
+
+    except Exception as e:
+
+        print(
+            f"⚠️ Error resumen datos: {e}"
+        )
+
+
+# ============================================================
+# DIAGNÓSTICO DEL ESTADO
+# ============================================================
+
+def imprimir_estado_pendiente():
+
+    try:
+
+        direccion = (
+            estado["direccion_pendiente"]
+        )
+
+        if direccion is None:
+
+            print(
+                "📭 Sin prealerta pendiente"
+            )
+
+            return
+
+        print("")
+        print("📌 PREALERTA ACTIVA")
+        print("-----------------------------------")
+
+        print(
+            f"Dirección: {direccion}"
+        )
+
+        print(
+            f"ID: "
+            f"{estado['id_pendiente']}"
+        )
+
+        print(
+            f"Nivel continuación: "
+            f"{estado['nivel_continuacion']}"
+        )
+
+        print(
+            f"Velas pendiente: "
+            f"{estado['velas_pendiente']}"
+        )
+
+    except Exception as e:
+
+        print(
+            f"⚠️ Error estado: {e}"
+        )
+
+
+# ============================================================
+# ANALIZAR V4.2.1
 # ============================================================
 
 def analizar():
@@ -3154,7 +3369,7 @@ def analizar():
 
         print("")
         print("===================================")
-        print("🔍 ANALIZANDO XAU/USD V4.2")
+        print("🔍 ANALIZANDO XAU/USD V4.2.1")
         print("===================================")
 
         ahora = time.time()
@@ -3185,17 +3400,34 @@ def analizar():
         # DATOS
         # ====================================================
 
+        print(
+            "📡 Solicitando datos 5M..."
+        )
+
         df5 = obtener_datos(
             INTERVALO_5M
+        )
+
+        print(
+            "📡 Solicitando datos 15M..."
         )
 
         df15 = obtener_datos(
             INTERVALO_15M
         )
 
+        imprimir_resumen_datos(
+            df5,
+            df15
+        )
+
         # ====================================================
         # INDICADORES
         # ====================================================
+
+        print(
+            "📊 Calculando indicadores..."
+        )
 
         df5 = calcular_indicadores(
             df5
@@ -3673,6 +3905,8 @@ def analizar():
             f"{score_venta}/100"
         )
 
+        imprimir_estado_pendiente()
+
         # ====================================================
         # PREALERTA ACTIVA
         # ====================================================
@@ -3712,10 +3946,6 @@ def analizar():
                         "COMPRA",
                         motivo
                     )
-
-                # ---------------------------------------------
-                # CONFIRMACIÓN
-                # ---------------------------------------------
 
                 nivel = float(
                     estado[
@@ -4199,13 +4429,13 @@ def analizar():
                 "SIN_SEÑAL",
 
             "mensaje":
-                "😴 Sin señal V4.2"
+                "😴 Sin señal V4.2.1"
         }
 
     except Exception as e:
 
         print("")
-        print("❌ ERROR EN ANALIZAR V4.2:")
+        print("❌ ERROR EN ANALIZAR V4.2.1:")
         print(repr(e))
 
         return {
@@ -4214,6 +4444,5 @@ def analizar():
                 "ERROR",
 
             "mensaje":
-                f"❌ Error V4.2:\n{e}"
+                f"❌ Error V4.2.1:\n{e}"
     }
-              
