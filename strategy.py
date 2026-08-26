@@ -13,11 +13,11 @@ from ta.trend import ADXIndicator
 # XAU SNIPER AI V4.1
 # MOTOR DE ESTRUCTURA + MOMENTUM + LIQUIDEZ
 #
-# DATA PROVIDER:
+# PROVEEDOR:
 # BiQuote
 #
-# IMPORTANTE:
-# Este motor funciona en PAPER / ESCÁNER.
+# MODO:
+# PAPER / ESCÁNER
 # ============================================================
 
 
@@ -50,7 +50,7 @@ TIMEOUT = 12
 
 
 # ============================================================
-# ESTADO DEL MOTOR
+# ESTADO
 # ============================================================
 
 estado_prealerta = None
@@ -85,16 +85,32 @@ def ahora_ms():
 def limpiar_numero(valor):
 
     try:
-
         return float(valor)
 
     except Exception:
-
         return np.nan
 
 
+def numero_fmt(valor):
+
+    try:
+        return f"{float(valor):.2f}"
+
+    except Exception:
+        return "N/D"
+
+
+def precio_fmt(valor):
+
+    try:
+        return f"{float(valor):.2f}"
+
+    except Exception:
+        return "N/D"
+
+
 # ============================================================
-# DESCARGAR OHLC DE BIQUOTE
+# DESCARGAR OHLC BIQUOTE
 # ============================================================
 
 def obtener_ohlc(
@@ -172,25 +188,17 @@ def obtener_ohlc(
             + ", ".join(faltantes)
         )
 
-    df["open"] = pd.to_numeric(
-        df["open"],
-        errors="coerce"
-    )
+    for columna in [
+        "open",
+        "high",
+        "low",
+        "close"
+    ]:
 
-    df["high"] = pd.to_numeric(
-        df["high"],
-        errors="coerce"
-    )
-
-    df["low"] = pd.to_numeric(
-        df["low"],
-        errors="coerce"
-    )
-
-    df["close"] = pd.to_numeric(
-        df["close"],
-        errors="coerce"
-    )
+        df[columna] = pd.to_numeric(
+            df[columna],
+            errors="coerce"
+        )
 
     df["openTime"] = pd.to_datetime(
         df["openTime"],
@@ -216,7 +224,6 @@ def obtener_ohlc(
         subset=["openTime"]
     )
 
-    # No usamos la vela todavía abierta.
     if "isOpen" in df.columns:
 
         df = df[
@@ -235,6 +242,7 @@ def obtener_ohlc(
         )
 
     return df
+
 
 # ============================================================
 # INDICADORES
@@ -271,14 +279,41 @@ def agregar_indicadores(df):
     df["di_plus"] = adx.adx_pos()
     df["di_minus"] = adx.adx_neg()
 
-    return df
+    df = df.replace(
+        [np.inf, -np.inf],
+        np.nan
+    )
+
+    df = df.dropna(
+        subset=[
+            "atr",
+            "rsi",
+            "adx",
+            "di_plus",
+            "di_minus"
+        ]
+    )
+
+    if len(df) < 50:
+
+        raise RuntimeError(
+            "No hay suficientes datos "
+            "después de indicadores."
+        )
+
+    return df.reset_index(
+        drop=True
+    )
 
 
 # ============================================================
-# PIVOTS / ESTRUCTURA
+# PIVOTS
 # ============================================================
 
-def detectar_pivots(df, ventana=3):
+def detectar_pivots(
+    df,
+    ventana=3
+):
 
     df = df.copy()
 
@@ -325,7 +360,7 @@ def detectar_pivots(df, ventana=3):
 
 
 # ============================================================
-# EXTRAER ÚLTIMOS PIVOTS
+# ÚLTIMOS PIVOTS
 # ============================================================
 
 def ultimos_pivots(df):
@@ -371,16 +406,18 @@ def evaluar_estructura(df):
             "choch_alcista": False,
             "choch_bajista": False,
             "swing_high": None,
-            "swing_low": None
+            "swing_low": None,
+            "hh": False,
+            "hl": False,
+            "lh": False,
+            "ll": False
         }
 
     h1 = highs[-1]
     h2 = highs[-2]
-    h3 = highs[-3]
 
     l1 = lows[-1]
     l2 = lows[-2]
-    l3 = lows[-3]
 
     hh = h1 > h2
     hl = l1 > l2
@@ -389,7 +426,7 @@ def evaluar_estructura(df):
     ll = l1 < l2
 
     regimen = "LATERAL"
-    estructura = "MIxta"
+    estructura = "MIXTA"
 
     if hh and hl:
 
@@ -404,10 +441,12 @@ def evaluar_estructura(df):
     elif hh and ll:
 
         regimen = "TRANSICION"
+        estructura = "HH + LL"
 
     elif lh and hl:
 
         regimen = "TRANSICION"
+        estructura = "LH + HL"
 
     cierre = float(
         df["close"].iloc[-1]
@@ -458,33 +497,14 @@ def evaluar_momentum(df):
 
     ult = df.iloc[-1]
 
-    cierre = float(
-        ult["close"]
-    )
+    cierre = float(ult["close"])
+    apertura = float(ult["open"])
+    high = float(ult["high"])
+    low = float(ult["low"])
 
-    apertura = float(
-        ult["open"]
-    )
-
-    high = float(
-        ult["high"]
-    )
-
-    low = float(
-        ult["low"]
-    )
-
-    atr = float(
-        ult["atr"]
-    )
-
-    rsi = float(
-        ult["rsi"]
-    )
-
-    adx = float(
-        ult["adx"]
-    )
+    atr = float(ult["atr"])
+    rsi = float(ult["rsi"])
+    adx = float(ult["adx"])
 
     di_plus = float(
         ult["di_plus"]
@@ -561,7 +581,6 @@ def detectar_pullback(
 ):
 
     precio = momentum["precio"]
-
     atr = momentum["atr"]
 
     if atr <= 0:
@@ -583,27 +602,19 @@ def detectar_pullback(
     swing_high = highs[-1]
     swing_low = lows[-1]
 
-    distancia_low = (
-        abs(precio - swing_low)
+    distancia_low = abs(
+        precio - swing_low
     )
 
-    distancia_high = (
-        abs(precio - swing_high)
+    distancia_high = abs(
+        precio - swing_high
     )
-
-    # Pullback comprador:
-    # precio retrocede hacia el último mínimo
-    # pero mantiene estructura alcista.
 
     pullback_compra = (
         estructura["regimen"] == "ALCISTA"
         and distancia_low <= atr * 2.0
         and precio >= swing_low
     )
-
-    # Pullback vendedor:
-    # precio retrocede hacia el último máximo
-    # pero mantiene estructura bajista.
 
     pullback_venta = (
         estructura["regimen"] == "BAJISTA"
@@ -612,8 +623,11 @@ def detectar_pullback(
     )
 
     return {
-        "pullback_compra": pullback_compra,
-        "pullback_venta": pullback_venta
+        "pullback_compra":
+            pullback_compra,
+
+        "pullback_venta":
+            pullback_venta
     }
 
 
@@ -627,7 +641,6 @@ def detectar_continuacion(
 ):
 
     ult = df.iloc[-1]
-
     anterior = df.iloc[-2]
 
     close = float(
@@ -678,7 +691,7 @@ def detectar_continuacion(
 
 
 # ============================================================
-# SCORE
+# SCORE COMPRA
 # ============================================================
 
 def calcular_score_compra(
@@ -750,6 +763,10 @@ def calcular_score_compra(
     return min(score, 100), razones
 
 
+# ============================================================
+# SCORE VENTA
+# ============================================================
+
 def calcular_score_venta(
     estructura,
     momentum,
@@ -820,7 +837,7 @@ def calcular_score_venta(
 
 
 # ============================================================
-# DISTANCIAS
+# NIVELES
 # ============================================================
 
 def calcular_niveles(
@@ -828,6 +845,14 @@ def calcular_niveles(
     precio,
     atr
 ):
+
+    if atr <= 0:
+
+        return (
+            precio,
+            precio,
+            0
+        )
 
     if direccion == "COMPRA":
 
@@ -868,15 +893,11 @@ def calcular_niveles(
             distancia_sl
         )
 
-    return (
-        sl,
-        tp,
-        rr
-    )
+    return sl, tp, rr
 
 
 # ============================================================
-# VALIDAR RR
+# RR
 # ============================================================
 
 def rr_valido(rr):
@@ -887,33 +908,7 @@ def rr_valido(rr):
 
 
 # ============================================================
-# FORMATO
-# ============================================================
-
-def precio_fmt(valor):
-
-    try:
-
-        return f"{float(valor):.2f}"
-
-    except Exception:
-
-        return "N/D"
-
-
-def numero_fmt(valor):
-
-    try:
-
-        return f"{float(valor):.2f}"
-
-    except Exception:
-
-        return "N/D"
-
-
-# ============================================================
-# ID DE SEÑAL
+# ID
 # ============================================================
 
 def generar_id(
@@ -1001,6 +996,8 @@ def guardar_prealerta(
 
 def prealerta_vigente():
 
+    global estado_prealerta
+
     if not estado_prealerta:
 
         return False
@@ -1010,10 +1007,9 @@ def prealerta_vigente():
         - estado_prealerta["timestamp"]
     )
 
-    # Una prealerta vive como máximo
-    # 15 minutos.
-
     if edad > MINUTOS_REPETICION * 60:
+
+        estado_prealerta = None
 
         return False
 
@@ -1038,9 +1034,7 @@ def descartar_prealerta(
 
         return {
             "tipo": "SIN_SEÑAL",
-            "mensaje": (
-                "😴 SIN_SEÑAL"
-            )
+            "mensaje": "😴 SIN_SEÑAL"
         }
 
     return {
@@ -1051,18 +1045,20 @@ def descartar_prealerta(
             "❌ PREALERTA DESCARTADA\n\n"
             f"📌 Dirección: "
             f"{anterior['direccion']}\n"
+            f"🆔 ID: "
+            f"{anterior['id']}\n"
             f"📊 Score inicial: "
             f"{anterior['score']}/100\n\n"
             f"🧠 Motivo:\n"
             f"{motivo}\n\n"
             "🔍 La estructura ya no cumple "
-            "las condiciones de continuación."
+            "las condiciones."
         )
     }
 
 
 # ============================================================
-# VALIDAR CONFIRMACIÓN
+# CONFIRMACIÓN
 # ============================================================
 
 def confirmar_prealerta(
@@ -1083,35 +1079,26 @@ def confirmar_prealerta(
     direccion = p["direccion"]
 
     precio = momentum5["precio"]
-
     rsi = momentum5["rsi"]
-
     adx = momentum5["adx"]
 
     if direccion == "COMPRA":
 
         confirmada = (
             estructura5["regimen"] == "ALCISTA"
-            and
-            estructura15["regimen"]
+            and estructura15["regimen"]
             in ["ALCISTA", "TRANSICION"]
-            and
-            continuacion5[
+            and continuacion5[
                 "continuacion_compra"
             ]
-            and
-            rsi >= RSI_CONFIRMACION_COMPRA
-            and
-            adx >= ADX_MINIMO
-            and
-            precio >= p["precio"]
+            and rsi >= RSI_CONFIRMACION_COMPRA
+            and adx >= ADX_MINIMO
+            and precio >= p["precio"]
         )
 
         invalidada = (
-            estructura5["regimen"]
-            == "BAJISTA"
-            or
-            precio < (
+            estructura5["regimen"] == "BAJISTA"
+            or precio < (
                 p["precio"]
                 - p["atr"] * 0.80
             )
@@ -1121,26 +1108,19 @@ def confirmar_prealerta(
 
         confirmada = (
             estructura5["regimen"] == "BAJISTA"
-            and
-            estructura15["regimen"]
+            and estructura15["regimen"]
             in ["BAJISTA", "TRANSICION"]
-            and
-            continuacion5[
+            and continuacion5[
                 "continuacion_venta"
             ]
-            and
-            rsi <= RSI_CONFIRMACION_VENTA
-            and
-            adx >= ADX_MINIMO
-            and
-            precio <= p["precio"]
+            and rsi <= RSI_CONFIRMACION_VENTA
+            and adx >= ADX_MINIMO
+            and precio <= p["precio"]
         )
 
         invalidada = (
-            estructura5["regimen"]
-            == "ALCISTA"
-            or
-            precio > (
+            estructura5["regimen"] == "ALCISTA"
+            or precio > (
                 p["precio"]
                 + p["atr"] * 0.80
             )
@@ -1183,39 +1163,32 @@ def construir_prealerta(
         else "🔴"
     )
 
-    texto = (
+    return (
         f"{emoji} XAU SNIPER AI V4.1\n\n"
-        f"⚠️ PREALERTA "
-        f"{direccion}\n\n"
+        f"⚠️ PREALERTA {direccion}\n\n"
         f"🆔 ID: {identificador}\n"
         f"📊 Score: {score}/100\n"
-        f"💰 Precio: "
-        f"{precio_fmt(precio)}\n\n"
-
-        f"📈 5M: "
-        f"{estructura5['regimen']}\n"
-        f"📊 15M: "
-        f"{estructura15['regimen']}\n\n"
-
+        f"💰 Precio: {precio_fmt(precio)}\n\n"
+        f"📈 5M: {estructura5['regimen']}\n"
+        f"📊 15M: {estructura15['regimen']}\n\n"
         f"RSI 5M: "
         f"{numero_fmt(momentum5['rsi'])}\n"
         f"ADX 5M: "
-        f"{numero_fmt(momentum5['adx'])}\n\n"
-
+        f"{numero_fmt(momentum5['adx'])}\n"
+        f"DI+: "
+        f"{numero_fmt(momentum5['di_plus'])}\n"
+        f"DI-: "
+        f"{numero_fmt(momentum5['di_minus'])}\n\n"
         f"🛑 SL referencia: "
         f"{precio_fmt(sl)}\n"
         f"🎯 TP referencia: "
         f"{precio_fmt(tp)}\n"
         f"📐 RR: 1:{numero_fmt(rr)}\n\n"
-
         "🧠 Estructura detectada.\n"
         "🔄 Esperando pullback + "
         "continuación.\n\n"
-
         "⚠️ AÚN NO CONFIRMADA"
     )
-
-    return texto
 
 
 # ============================================================
@@ -1241,43 +1214,33 @@ def construir_confirmacion(
         else "🔴"
     )
 
-    texto = (
+    return (
         f"{emoji} XAU SNIPER AI V4.1\n\n"
         f"🔥 ALERTA CONFIRMADA: "
         f"{direccion}\n\n"
-
         f"🆔 ID: {identificador}\n"
         f"📊 Score: {score}/100\n"
         f"💰 Entrada referencia: "
         f"{precio_fmt(precio)}\n\n"
-
-        f"📈 5M: "
-        f"{estructura5['regimen']}\n"
-        f"📊 15M: "
-        f"{estructura15['regimen']}\n\n"
-
+        f"📈 5M: {estructura5['regimen']}\n"
+        f"📊 15M: {estructura15['regimen']}\n\n"
         f"RSI: "
         f"{numero_fmt(momentum5['rsi'])}\n"
         f"ADX: "
         f"{numero_fmt(momentum5['adx'])}\n\n"
-
         f"🛑 SL referencia: "
         f"{precio_fmt(sl)}\n"
         f"🎯 TP referencia: "
         f"{precio_fmt(tp)}\n"
         f"📐 RR: 1:{numero_fmt(rr)}\n\n"
-
         "🚀 Impulso + Pullback + "
         "Continuación detectados.\n\n"
-
         "⚠️ PAPER / ESCÁNER"
     )
 
-    return texto
-
 
 # ============================================================
-# MENSAJE DIAGNÓSTICO
+# DIAGNÓSTICO
 # ============================================================
 
 def construir_diagnostico(
@@ -1290,41 +1253,49 @@ def construir_diagnostico(
 
     return (
         "📋 DIAGNÓSTICO XAU SNIPER\n\n"
-
-        f"5M: "
-        f"{estructura5['regimen']}\n"
-
-        f"15M: "
-        f"{estructura15['regimen']}\n\n"
-
+        f"5M: {estructura5['regimen']}\n"
+        f"15M: {estructura15['regimen']}\n\n"
         f"RSI: "
         f"{numero_fmt(momentum5['rsi'])}\n"
-
         f"ADX: "
         f"{numero_fmt(momentum5['adx'])}\n"
-
         f"DI+: "
         f"{numero_fmt(momentum5['di_plus'])}\n"
-
         f"DI-: "
         f"{numero_fmt(momentum5['di_minus'])}\n\n"
-
         f"Pullback compra: "
         f"{pullback5['pullback_compra']}\n"
-
         f"Pullback venta: "
         f"{pullback5['pullback_venta']}\n\n"
-
         f"Continuación compra: "
         f"{continuacion5['continuacion_compra']}\n"
-
         f"Continuación venta: "
         f"{continuacion5['continuacion_venta']}"
     )
 
 
 # ============================================================
-# ANALIZAR 5M + 15M
+# ERROR
+# ============================================================
+
+def construir_error(
+    mensaje
+):
+
+    return {
+        "tipo": "ERROR",
+        "mensaje": (
+            "❌ XAU SNIPER AI V4.1\n\n"
+            "⚠️ Error de datos / motor\n\n"
+            f"{mensaje}\n\n"
+            "📡 Proveedor: BiQuote\n"
+            "🛑 El bot continúa ejecutándose."
+        )
+    }
+
+
+# ============================================================
+# ANALIZAR
 # ============================================================
 
 def analizar():
@@ -1363,41 +1334,28 @@ def analizar():
         # INDICADORES
         # ----------------------------------------------------
 
-        df5 = agregar_indicadores(
-            df5
-        )
+        df5 = agregar_indicadores(df5)
+        df15 = agregar_indicadores(df15)
 
-        df15 = agregar_indicadores(
-            df15
-        )
+        # ----------------------------------------------------
+        # PIVOTS
+        # ----------------------------------------------------
+
+        df5 = detectar_pivots(df5)
+        df15 = detectar_pivots(df15)
 
         # ----------------------------------------------------
         # ESTRUCTURA
         # ----------------------------------------------------
 
-        df5 = detectar_pivots(
-            df5
-        )
-
-        df15 = detectar_pivots(
-            df15
-        )
-
-        estructura5 = evaluar_estructura(
-            df5
-        )
-
-        estructura15 = evaluar_estructura(
-            df15
-        )
+        estructura5 = evaluar_estructura(df5)
+        estructura15 = evaluar_estructura(df15)
 
         # ----------------------------------------------------
         # MOMENTUM
         # ----------------------------------------------------
 
-        momentum5 = evaluar_momentum(
-            df5
-        )
+        momentum5 = evaluar_momentum(df5)
 
         # ----------------------------------------------------
         # PULLBACK
@@ -1429,6 +1387,11 @@ def analizar():
         )
 
         print(
+            f"💰 Precio: "
+            f"{momentum5['precio']:.2f}"
+        )
+
+        print(
             f"RSI: "
             f"{momentum5['rsi']:.2f}"
         )
@@ -1439,29 +1402,27 @@ def analizar():
         )
 
         # ====================================================
-        # 1. COMPROBAR PREALERTA EXISTENTE
+        # PREALERTA EXISTENTE
         # ====================================================
 
         if prealerta_vigente():
 
             print(
-                "⚠️ PREALERTA ACTIVA:"
-                f" {estado_prealerta['id']}"
+                "⚠️ PREALERTA ACTIVA: "
+                f"{estado_prealerta['id']}"
             )
 
-            confirmacion = (
-                confirmar_prealerta(
-                    df5,
-                    df15,
-                    estructura5,
-                    estructura15,
-                    momentum5,
-                    continuacion5
-                )
+            confirmacion = confirmar_prealerta(
+                df5,
+                df15,
+                estructura5,
+                estructura15,
+                momentum5,
+                continuacion5
             )
 
             # ------------------------------------------------
-            # PREALERTA DESCARTADA
+            # DESCARTADA
             # ------------------------------------------------
 
             if isinstance(
@@ -1472,7 +1433,7 @@ def analizar():
                 return confirmacion
 
             # ------------------------------------------------
-            # PREALERTA CONFIRMADA
+            # CONFIRMADA
             # ------------------------------------------------
 
             if confirmacion is True:
@@ -1489,10 +1450,6 @@ def analizar():
 
                 atr = (
                     momentum5["atr"]
-                )
-
-                score = (
-                    0
                 )
 
                 if direccion == "COMPRA":
@@ -1517,12 +1474,10 @@ def analizar():
                         )
                     )
 
-                sl, tp, rr = (
-                    calcular_niveles(
-                        direccion,
-                        precio,
-                        atr
-                    )
+                sl, tp, rr = calcular_niveles(
+                    direccion,
+                    precio,
+                    atr
                 )
 
                 if not rr_valido(rr):
@@ -1544,19 +1499,17 @@ def analizar():
                     time.time()
                 )
 
-                mensaje = (
-                    construir_confirmacion(
-                        direccion,
-                        identificador,
-                        precio,
-                        sl,
-                        tp,
-                        rr,
-                        score,
-                        estructura5,
-                        estructura15,
-                        momentum5
-                    )
+                mensaje = construir_confirmacion(
+                    direccion,
+                    identificador,
+                    precio,
+                    sl,
+                    tp,
+                    rr,
+                    score,
+                    estructura5,
+                    estructura15,
+                    momentum5
                 )
 
                 estado_prealerta = None
@@ -1589,7 +1542,7 @@ def analizar():
             }
 
         # ====================================================
-        # 2. SI HAY COOLDOWN, NO CREAR OTRA
+        # COOLDOWN
         # ====================================================
 
         if cooldown_activo():
@@ -1605,8 +1558,9 @@ def analizar():
                 )
             }
 
+
         # ====================================================
-        # 3. CALCULAR SCORE
+        # SCORE
         # ====================================================
 
         score_compra, razones_compra = (
@@ -1627,8 +1581,18 @@ def analizar():
             )
         )
 
+        print(
+            f"🎯 Score COMPRA: "
+            f"{score_compra}/100"
+        )
+
+        print(
+            f"🎯 Score VENTA: "
+            f"{score_venta}/100"
+        )
+
         # ====================================================
-        # 4. DETECTAR POSIBLE COMPRA
+        # SETUP COMPRA
         # ====================================================
 
         setup_compra = (
@@ -1636,7 +1600,10 @@ def analizar():
             == "ALCISTA"
             and
             estructura15["regimen"]
-            in ["ALCISTA", "TRANSICION"]
+            in [
+                "ALCISTA",
+                "TRANSICION"
+            ]
             and
             momentum5["momentum_alcista"]
             and
@@ -1647,7 +1614,7 @@ def analizar():
         )
 
         # ====================================================
-        # 5. DETECTAR POSIBLE VENTA
+        # SETUP VENTA
         # ====================================================
 
         setup_venta = (
@@ -1655,7 +1622,10 @@ def analizar():
             == "BAJISTA"
             and
             estructura15["regimen"]
-            in ["BAJISTA", "TRANSICION"]
+            in [
+                "BAJISTA",
+                "TRANSICION"
+            ]
             and
             momentum5["momentum_bajista"]
             and
@@ -1663,11 +1633,10 @@ def analizar():
             >= ADX_MINIMO
             and
             pullback5["pullback_venta"]
-            )
-
+        )
 
         # ====================================================
-        # 6. CREAR PREALERTA COMPRA
+        # PREALERTA COMPRA
         # ====================================================
 
         if (
@@ -1680,15 +1649,18 @@ def analizar():
             precio = momentum5["precio"]
             atr = momentum5["atr"]
 
-            sl, tp, rr = (
-                calcular_niveles(
-                    direccion,
-                    precio,
-                    atr
-                )
+            sl, tp, rr = calcular_niveles(
+                direccion,
+                precio,
+                atr
             )
 
             if not rr_valido(rr):
+
+                print(
+                    "❌ Compra descartada "
+                    "por RR."
+                )
 
                 return {
                     "tipo": "SIN_SEÑAL",
@@ -1698,30 +1670,26 @@ def analizar():
                     )
                 }
 
-            identificador = (
-                guardar_prealerta(
-                    direccion,
-                    precio,
-                    atr,
-                    score_compra,
-                    estructura5,
-                    momentum5
-                )
+            identificador = guardar_prealerta(
+                direccion,
+                precio,
+                atr,
+                score_compra,
+                estructura5,
+                momentum5
             )
 
-            mensaje = (
-                construir_prealerta(
-                    direccion,
-                    identificador,
-                    precio,
-                    sl,
-                    tp,
-                    rr,
-                    score_compra,
-                    estructura5,
-                    estructura15,
-                    momentum5
-                )
+            mensaje = construir_prealerta(
+                direccion,
+                identificador,
+                precio,
+                sl,
+                tp,
+                rr,
+                score_compra,
+                estructura5,
+                estructura15,
+                momentum5
             )
 
             print(
@@ -1735,7 +1703,7 @@ def analizar():
             }
 
         # ====================================================
-        # 7. CREAR PREALERTA VENTA
+        # PREALERTA VENTA
         # ====================================================
 
         if (
@@ -1748,15 +1716,18 @@ def analizar():
             precio = momentum5["precio"]
             atr = momentum5["atr"]
 
-            sl, tp, rr = (
-                calcular_niveles(
-                    direccion,
-                    precio,
-                    atr
-                )
+            sl, tp, rr = calcular_niveles(
+                direccion,
+                precio,
+                atr
             )
 
             if not rr_valido(rr):
+
+                print(
+                    "❌ Venta descartada "
+                    "por RR."
+                )
 
                 return {
                     "tipo": "SIN_SEÑAL",
@@ -1766,30 +1737,26 @@ def analizar():
                     )
                 }
 
-            identificador = (
-                guardar_prealerta(
-                    direccion,
-                    precio,
-                    atr,
-                    score_venta,
-                    estructura5,
-                    momentum5
-                )
+            identificador = guardar_prealerta(
+                direccion,
+                precio,
+                atr,
+                score_venta,
+                estructura5,
+                momentum5
             )
 
-            mensaje = (
-                construir_prealerta(
-                    direccion,
-                    identificador,
-                    precio,
-                    sl,
-                    tp,
-                    rr,
-                    score_venta,
-                    estructura5,
-                    estructura15,
-                    momentum5
-                )
+            mensaje = construir_prealerta(
+                direccion,
+                identificador,
+                precio,
+                sl,
+                tp,
+                rr,
+                score_venta,
+                estructura5,
+                estructura15,
+                momentum5
             )
 
             print(
@@ -1802,32 +1769,61 @@ def analizar():
                 "mensaje": mensaje
             }
 
+
         # ====================================================
-        # 8. SIN SEÑAL
+        # SIN SEÑAL
         # ====================================================
 
-        print(
-            "😴 SIN_SEÑAL"
+        diagnostico = construir_diagnostico(
+            estructura5,
+            estructura15,
+            momentum5,
+            pullback5,
+            continuacion5
         )
 
-        print(
-            construir_diagnostico(
-                estructura5,
-                estructura15,
-                momentum5,
-                pullback5,
-                continuacion5
-            )
-        )
+        print(diagnostico)
 
         return {
             "tipo": "SIN_SEÑAL",
-            "mensaje": (
-                "😴 SIN_SEÑAL"
-            )
+            "mensaje": "😴 SIN_SEÑAL"
         }
+
+    # ========================================================
+    # ERROR CONTROLADO
+    # ========================================================
+
+    except RuntimeError as e:
+
+        print(
+            f"⚠️ ERROR DE DATOS: {e}"
+        )
+
+        return construir_error(
+            str(e)
+        )
+
+    except requests.RequestException as e:
+
+        print(
+            f"⚠️ ERROR HTTP: {e}"
+        )
+
+        return construir_error(
+            f"Error HTTP: {e}"
+        )
+
+    except Exception as e:
+
+        print(
+            f"❌ ERROR INTERNO STRATEGY: {e}"
+        )
+
+        return construir_error(
+            f"Error interno: {e}"
+        )
 
 
 # ============================================================
-# FIN
+# FIN XAU SNIPER AI V4.1
 # ============================================================
