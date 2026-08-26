@@ -231,9 +231,44 @@ async def ejecutar_analisis(
 
         print(mensaje)
 
+        # -------------------------------------------------
+        # SIN SEÑAL
+        # -------------------------------------------------
+
         if tipo == "SIN_SEÑAL":
 
             return
+
+        # -------------------------------------------------
+        # ESPERANDO
+        #
+        # NO se envía cada 100 segundos a Telegram.
+        # El detalle de qué falta queda en Railway.
+        # -------------------------------------------------
+
+        if tipo == "ESPERANDO":
+
+            print(
+                "⏳ Prealerta esperando "
+                "confirmación."
+            )
+
+            faltantes = resultado.get(
+                "faltantes",
+                []
+            )
+
+            for falta in faltantes:
+
+                print(
+                    f"   ❌ {falta}"
+                )
+
+            return
+
+        # -------------------------------------------------
+        # ERROR
+        # -------------------------------------------------
 
         if tipo == "ERROR":
 
@@ -245,7 +280,14 @@ async def ejecutar_analisis(
 
             return
 
-        identificador = resultado.get("id")
+        # -------------------------------------------------
+        # PREALERTA / CONFIRMADA /
+        # DESCARTADA
+        # -------------------------------------------------
+
+        identificador = resultado.get(
+            "id"
+        )
 
         if (
             identificador
@@ -281,7 +323,7 @@ async def ejecutar_analisis(
 
         print(
             f"❌ ERROR BOT: {e}"
-    )
+)
 
 
 # =========================================================
@@ -342,6 +384,10 @@ async def status(
             "🧠 Motor:\n"
             "Estructura + Impulso + "
             "Pullback + Continuación\n\n"
+            "⏱️ Prealerta máxima: "
+            "30 minutos\n"
+            "🧊 Cooldown: "
+            "15 minutos\n\n"
             "⚠️ Modo: PAPER / ESCÁNER"
         ),
         reply_markup=teclado()
