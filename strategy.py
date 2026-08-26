@@ -1,238 +1,106 @@
 import requests
 import pandas as pd
 import numpy as np
-
-import os
 import time
 import uuid
-import logging
-from datetime import datetime, timezone
+
+from ta.volatility import AverageTrueRange
+from ta.momentum import RSIIndicator
+from ta.trend import ADXIndicator
 
 
-# =========================================================
-# XAU SNIPER AI V4.2
-# MOTOR:
+# ============================================================
+# XAU SNIPER AI V4.1
+# MOTOR DE ESTRUCTURA + MOMENTUM + LIQUIDEZ
 #
-# ESTRUCTURA + MOMENTUM + LIQUIDEZ
-#
-# PROVEEDOR:
+# DATA PROVIDER:
 # BiQuote
-# =========================================================
+#
+# IMPORTANTE:
+# Este motor funciona en PAPER / ESCÁNER.
+# ============================================================
 
 
-# =========================================================
-# CONFIGURACIÓN
-# =========================================================
+BIQUOTE_BASE = "https://biquote.io/api"
 
 SYMBOL = "XAUUSD"
-
-BIQUOTE_BASE = (
-    "https://biquote.io/api"
-)
 
 INTERVALO_5M = "5m"
 INTERVALO_15M = "15m"
 
-VELAS_5M = 300
-VELAS_15M = 200
+BARRAS_5M = 300
+BARRAS_15M = 200
 
-TIMEOUT = 15
+ADX_MINIMO = 15
+
+RSI_COMPRA = 52
+RSI_VENTA = 48
+
+RSI_CONFIRMACION_COMPRA = 55
+RSI_CONFIRMACION_VENTA = 45
 
 ATR_SL = 1.30
 ATR_TP = 2.20
 
 RR_MINIMO = 1.50
 
-ADX_MINIMO = 15.0
-
-RSI_COMPRA = 52.0
-RSI_VENTA = 48.0
-
-RSI_CONFIRMACION_COMPRA = 55.0
-RSI_CONFIRMACION_VENTA = 45.0
-
-MIN_SCORE_PREALERTA = 60
-MIN_SCORE_CONFIRMACION = 75
-
 MINUTOS_REPETICION = 15
 
-SWING_LOOKBACK = 3
-
-LOG_LEVEL = logging.INFO
+TIMEOUT = 12
 
 
-# =========================================================
-# LOGGING
-# =========================================================
+# ============================================================
+# ESTADO DEL MOTOR
+# ============================================================
 
-logging.basicConfig(
-    level=LOG_LEVEL,
-    format=(
-        "%(asctime)s | "
-        "%(levelname)s | "
-        "%(message)s"
-    )
-)
+estado_prealerta = None
 
-logger = logging.getLogger(
-    "XAU_SNIPER_V4"
-)
+ultima_alerta_id = None
+ultima_alerta_timestamp = 0
+
+ultima_confirmacion_id = None
+ultima_confirmacion_timestamp = 0
 
 
-# =========================================================
+# ============================================================
 # SESIÓN HTTP
-# =========================================================
+# ============================================================
 
 SESSION = requests.Session()
 
 SESSION.headers.update({
-    "User-Agent":
-        "XAU-Sniper-AI-V4/4.2"
+    "User-Agent": "XAU-Sniper-AI/4.1"
 })
 
 
-# =========================================================
-# ESTADO GLOBAL DEL SETUP
-# =========================================================
-#
-# Aquí está la corrección importante.
-#
-# Una PREALERTA no desaparece después de enviarla.
-#
-# Se conserva:
-#
-# {
-#   id,
-#   direccion,
-#   estado,
-#   precio_prealerta,
-#   ...
-# }
-#
-# y en los siguientes ciclos se intenta confirmar
-# o invalidar.
-# =========================================================
+# ============================================================
+# UTILIDADES
+# ============================================================
 
-SETUP_ACTIVO = None
+def ahora_ms():
+
+    return int(time.time() * 1000)
 
 
-# =========================================================
-# CACHE PARA EVITAR PETICIONES INNECESARIAS
-# =========================================================
-
-CACHE = {
-    "5m": {
-        "timestamp": 0,
-        "df": None
-    },
-    "15m": {
-        "timestamp": 0,
-        "df": None
-    }
-}
-
-
-CACHE_SEGUNDOS = 50
-
-
-# =========================================================
-# HELPERS BÁSICOS
-# =========================================================
-
-def ahora_utc():
-
-    return datetime.now(
-        timezone.utc
-    )
-
-
-def nuevo_id():
-
-    return (
-        datetime.now(
-            timezone.utc
-        ).strftime("%Y%m%d%H%M")
-        + "-"
-        + uuid.uuid4().hex[:6].upper()
-    )
-
-
-def numero(valor, default=np.nan):
+def limpiar_numero(valor):
 
     try:
 
         return float(valor)
 
-    except (
-        TypeError,
-        ValueError
-    ):
+    except Exception:
 
-        return default
+        return np.nan
 
 
-# =========================================================
-# VALIDACIÓN DE DATAFRAME
-# =========================================================
-
-def validar_dataframe(df):
-
-    if df is None:
-        return False
-
-    if df.empty:
-        return False
-
-    columnas = [
-        "open",
-        "high",
-        "low",
-        "close"
-    ]
-
-    for columna in columnas:
-
-        if columna not in df.columns:
-            return False
-
-    if len(df) < 50:
-        return False
-
-    return True
-
-
-# =========================================================
-# DESCARGA DE OHLC DESDE BIQUOTE
-# =========================================================
+# ============================================================
+# DESCARGAR OHLC DE BIQUOTE
+# ============================================================
 
 def obtener_ohlc(
     intervalo,
     limite
 ):
-
-    ahora = time.time()
-
-    cache = CACHE.get(
-        intervalo
-    )
-
-    # -----------------------------------------------------
-    # CACHE
-    # -----------------------------------------------------
-
-    if cache:
-
-        edad = (
-            ahora
-            - cache["timestamp"]
-        )
-
-        if (
-            cache["df"] is not None
-            and edad < CACHE_SEGUNDOS
-        ):
-
-            return cache["df"].copy()
 
     url = (
         f"{BIQUOTE_BASE}/"
@@ -244,2334 +112,1457 @@ def obtener_ohlc(
         "limit": limite
     }
 
-    ultimo_error = None
+    try:
 
-    # -----------------------------------------------------
-    # RETRY SUAVE
-    # -----------------------------------------------------
+        respuesta = SESSION.get(
+            url,
+            params=params,
+            timeout=TIMEOUT
+        )
 
-    for intento in range(3):
+        respuesta.raise_for_status()
 
-        try:
+        data = respuesta.json()
 
-            response = SESSION.get(
-                url,
-                params=params,
-                timeout=TIMEOUT
-            )
+    except requests.RequestException as e:
 
-            response.raise_for_status()
+        raise RuntimeError(
+            f"BiQuote HTTP: {e}"
+        )
 
-            data = response.json()
+    except ValueError:
 
-            if not isinstance(
-                data,
-                dict
-            ):
+        raise RuntimeError(
+            "BiQuote devolvió JSON inválido"
+        )
 
-                raise ValueError(
-                    "Respuesta BiQuote inválida"
-                )
+    if not isinstance(data, dict):
 
-            bars = data.get(
-                "bars"
-            )
+        raise RuntimeError(
+            "Respuesta BiQuote inesperada"
+        )
 
-            if not bars:
+    barras = data.get("bars")
 
-                raise ValueError(
-                    "BiQuote no devolvió velas"
-                )
+    if not barras:
 
-            df = pd.DataFrame(
-                bars
-            )
+        raise RuntimeError(
+            f"BiQuote sin barras para {intervalo}"
+        )
 
-            if df.empty:
+    df = pd.DataFrame(barras)
 
-                raise ValueError(
-                    "DataFrame vacío"
-                )
+    columnas = [
+        "openTime",
+        "open",
+        "high",
+        "low",
+        "close"
+    ]
 
-            # -------------------------------------------------
-            # TIMESTAMP
-            # -------------------------------------------------
+    faltantes = [
+        c for c in columnas
+        if c not in df.columns
+    ]
 
-            df["openTime"] = (
-                pd.to_datetime(
-                    df["openTime"],
-                    utc=True,
-                    errors="coerce"
-                )
-            )
+    if faltantes:
 
-            df = df.dropna(
-                subset=["openTime"]
-            )
+        raise RuntimeError(
+            "Faltan columnas BiQuote: "
+            + ", ".join(faltantes)
+        )
 
-            # -------------------------------------------------
-            # ELIMINAR VELA ABIERTA
-            # -------------------------------------------------
-
-            if "isOpen" in df.columns:
-
-                df = df[
-                    df["isOpen"] != True
-                ]
-
-            # -------------------------------------------------
-            # NUMÉRICOS
-            # -------------------------------------------------
-
-            for columna in [
-                "open",
-                "high",
-                "low",
-                "close"
-            ]:
-
-                df[columna] = pd.to_numeric(
-                    df[columna],
-                    errors="coerce"
-                )
-
-            if "tickVolume" in df.columns:
-
-                df["tickVolume"] = (
-                    pd.to_numeric(
-                        df["tickVolume"],
-                        errors="coerce"
-                    ).fillna(0)
-                )
-
-            else:
-
-                df["tickVolume"] = 0
-
-            df = df.dropna(
-                subset=[
-                    "open",
-                    "high",
-                    "low",
-                    "close"
-                ]
-            )
-
-            # -------------------------------------------------
-            # ORDEN CRONOLÓGICO
-            # -------------------------------------------------
-
-            df = (
-                df
-                .sort_values(
-                    "openTime"
-                )
-                .drop_duplicates(
-                    subset=["openTime"]
-                )
-                .reset_index(
-                    drop=True
-                )
-            )
-
-            if not validar_dataframe(
-                df
-            ):
-
-                raise ValueError(
-                    f"Datos insuficientes "
-                    f"para {intervalo}: "
-                    f"{len(df)} velas"
-                )
-
-            CACHE[intervalo] = {
-                "timestamp": ahora,
-                "df": df.copy()
-            }
-
-            logger.info(
-                "BiQuote %s: %s velas",
-                intervalo,
-                len(df)
-            )
-
-            return df
-
-        except Exception as e:
-
-            ultimo_error = e
-
-            logger.warning(
-                "BiQuote %s intento %s/3: %s",
-                intervalo,
-                intento + 1,
-                e
-            )
-
-            if intento < 2:
-
-                time.sleep(
-                    1.5 * (intento + 1)
-                )
-
-    raise RuntimeError(
-        f"BiQuote {intervalo} falló: "
-        f"{ultimo_error}"
+    df["open"] = pd.to_numeric(
+        df["open"],
+        errors="coerce"
     )
 
-
-# =========================================================
-# CARGAR MERCADO
-# =========================================================
-
-def cargar_mercado():
-
-    df5 = obtener_ohlc(
-        INTERVALO_5M,
-        VELAS_5M
+    df["high"] = pd.to_numeric(
+        df["high"],
+        errors="coerce"
     )
 
-    df15 = obtener_ohlc(
-        INTERVALO_15M,
-        VELAS_15M
+    df["low"] = pd.to_numeric(
+        df["low"],
+        errors="coerce"
     )
 
-    return df5, df15
+    df["close"] = pd.to_numeric(
+        df["close"],
+        errors="coerce"
+    )
 
+    df["openTime"] = pd.to_datetime(
+        df["openTime"],
+        utc=True,
+        errors="coerce"
+    )
 
-# =========================================================
+    df = df.dropna(
+        subset=[
+            "openTime",
+            "open",
+            "high",
+            "low",
+            "close"
+        ]
+    )
+
+    df = df.sort_values(
+        "openTime"
+    )
+
+    df = df.drop_duplicates(
+        subset=["openTime"]
+    )
+
+    # No usamos la vela todavía abierta.
+    if "isOpen" in df.columns:
+
+        df = df[
+            df["isOpen"] != True
+        ]
+
+    df = df.reset_index(
+        drop=True
+    )
+
+    if len(df) < 80:
+
+        raise RuntimeError(
+            f"Datos insuficientes "
+            f"{intervalo}: {len(df)}"
+        )
+
+    return df
+
+# ============================================================
 # INDICADORES
-# =========================================================
+# ============================================================
 
-def calcular_indicadores(df):
+def agregar_indicadores(df):
 
     df = df.copy()
 
-    close = df["close"]
-    high = df["high"]
-    low = df["low"]
-
-    # -----------------------------------------------------
-    # EMA
-    # -----------------------------------------------------
-
-    df["ema20"] = (
-        close.ewm(
-            span=20,
-            adjust=False
-        ).mean()
+    atr = AverageTrueRange(
+        high=df["high"],
+        low=df["low"],
+        close=df["close"],
+        window=14
     )
 
-    df["ema50"] = (
-        close.ewm(
-            span=50,
-            adjust=False
-        ).mean()
+    df["atr"] = atr.average_true_range()
+
+    rsi = RSIIndicator(
+        close=df["close"],
+        window=14
     )
 
-    df["ema200"] = (
-        close.ewm(
-            span=200,
-            adjust=False
-        ).mean()
+    df["rsi"] = rsi.rsi()
+
+    adx = ADXIndicator(
+        high=df["high"],
+        low=df["low"],
+        close=df["close"],
+        window=14
     )
 
-    # -----------------------------------------------------
-    # RSI
-    # -----------------------------------------------------
-
-    delta = close.diff()
-
-    gain = (
-        delta.clip(lower=0)
-        .ewm(
-            alpha=1 / 14,
-            adjust=False
-        )
-        .mean()
-    )
-
-    loss = (
-        (-delta.clip(upper=0))
-        .ewm(
-            alpha=1 / 14,
-            adjust=False
-        )
-        .mean()
-    )
-
-    rs = gain / loss.replace(
-        0,
-        np.nan
-    )
-
-    df["rsi"] = (
-        100
-        - (
-            100
-            / (1 + rs)
-        )
-    )
-
-    # -----------------------------------------------------
-    # TRUE RANGE
-    # -----------------------------------------------------
-
-    prev_close = close.shift(1)
-
-    tr1 = high - low
-
-    tr2 = (
-        high - prev_close
-    ).abs()
-
-    tr3 = (
-        low - prev_close
-    ).abs()
-
-    tr = pd.concat(
-        [
-            tr1,
-            tr2,
-            tr3
-        ],
-        axis=1
-    ).max(axis=1)
-
-    df["atr"] = (
-        tr.ewm(
-            alpha=1 / 14,
-            adjust=False
-        ).mean()
-    )
-
-    # -----------------------------------------------------
-    # ADX
-    # -----------------------------------------------------
-
-    up_move = (
-        high.diff()
-    )
-
-    down_move = (
-        -low.diff()
-    )
-
-    plus_dm = np.where(
-        (
-            (up_move > down_move)
-            & (up_move > 0)
-        ),
-        up_move,
-        0
-    )
-
-    minus_dm = np.where(
-        (
-            (down_move > up_move)
-            & (down_move > 0)
-        ),
-        down_move,
-        0
-    )
-
-    atr14 = (
-        tr.ewm(
-            alpha=1 / 14,
-            adjust=False
-        ).mean()
-    )
-
-    plus_di = (
-        100
-        * pd.Series(
-            plus_dm,
-            index=df.index
-        )
-        .ewm(
-            alpha=1 / 14,
-            adjust=False
-        )
-        .mean()
-        / atr14.replace(
-            0,
-            np.nan
-        )
-    )
-
-    minus_di = (
-        100
-        * pd.Series(
-            minus_dm,
-            index=df.index
-        )
-        .ewm(
-            alpha=1 / 14,
-            adjust=False
-        )
-        .mean()
-        / atr14.replace(
-            0,
-            np.nan
-        )
-    )
-
-    dx = (
-        100
-        * (plus_di - minus_di).abs()
-        / (
-            plus_di + minus_di
-        ).replace(
-            0,
-            np.nan
-        )
-    )
-
-    df["plus_di"] = plus_di
-    df["minus_di"] = minus_di
-
-    df["adx"] = (
-        dx.ewm(
-            alpha=1 / 14,
-            adjust=False
-        ).mean()
-    )
-
-    # -----------------------------------------------------
-    # VELOCIDAD DE LA VELA
-    # -----------------------------------------------------
-
-    df["body"] = (
-        df["close"]
-        - df["open"]
-    )
-
-    df["body_abs"] = (
-        df["body"].abs()
-    )
-
-    df["range"] = (
-        df["high"]
-        - df["low"]
-    )
-
-    df["body_ratio"] = (
-        df["body_abs"]
-        / df["range"].replace(
-            0,
-            np.nan
-        )
-    )
-
-    # -----------------------------------------------------
-    # RETORNO
-    # -----------------------------------------------------
-
-    df["return_3"] = (
-        close
-        .pct_change(3)
-        * 100
-    )
-
-    df["return_6"] = (
-        close
-        .pct_change(6)
-        * 100
-    )
+    df["adx"] = adx.adx()
+    df["di_plus"] = adx.adx_pos()
+    df["di_minus"] = adx.adx_neg()
 
     return df
 
 
-# =========================================================
-# ÚLTIMA FILA VÁLIDA
-# =========================================================
+# ============================================================
+# PIVOTS / ESTRUCTURA
+# ============================================================
 
-def ultima_fila(df):
+def detectar_pivots(df, ventana=3):
 
-    if df is None or df.empty:
-        return None
+    df = df.copy()
 
-    fila = df.iloc[-1]
+    df["pivot_high"] = False
+    df["pivot_low"] = False
 
-    return fila
-
-
-# =========================================================
-# ESTRUCTURA DE MERCADO
-# =========================================================
-
-def detectar_swings(
-    df,
-    izquierda=SWING_LOOKBACK,
-    derecha=SWING_LOOKBACK
-):
-
-    highs = []
-    lows = []
-
-    if len(df) < (
-        izquierda
-        + derecha
-        + 5
-    ):
-
-        return highs, lows
-
-    high_values = (
-        df["high"].values
-    )
-
-    low_values = (
-        df["low"].values
-    )
+    highs = df["high"].values
+    lows = df["low"].values
 
     for i in range(
-        izquierda,
-        len(df) - derecha
+        ventana,
+        len(df) - ventana
     ):
 
-        ventana_high = (
-            high_values[
-                i - izquierda:
-                i + derecha + 1
-            ]
-        )
+        bloque_high = highs[
+            i - ventana:
+            i + ventana + 1
+        ]
 
-        ventana_low = (
-            low_values[
-                i - izquierda:
-                i + derecha + 1
-            ]
-        )
+        bloque_low = lows[
+            i - ventana:
+            i + ventana + 1
+        ]
 
-        if (
-            high_values[i]
-            == max(ventana_high)
+        if highs[i] == max(
+            bloque_high
         ):
 
-            highs.append({
-                "index": i,
-                "price": float(
-                    high_values[i]
-                )
-            })
+            df.loc[
+                i,
+                "pivot_high"
+            ] = True
 
-        if (
-            low_values[i]
-            == min(ventana_low)
+        if lows[i] == min(
+            bloque_low
         ):
 
-            lows.append({
-                "index": i,
-                "price": float(
-                    low_values[i]
-                )
-            })
+            df.loc[
+                i,
+                "pivot_low"
+            ] = True
+
+    return df
+
+
+# ============================================================
+# EXTRAER ÚLTIMOS PIVOTS
+# ============================================================
+
+def ultimos_pivots(df):
+
+    ph = df[
+        df["pivot_high"]
+    ][
+        ["openTime", "high"]
+    ].tail(6)
+
+    pl = df[
+        df["pivot_low"]
+    ][
+        ["openTime", "low"]
+    ].tail(6)
+
+    highs = list(
+        ph["high"].astype(float)
+    )
+
+    lows = list(
+        pl["low"].astype(float)
+    )
 
     return highs, lows
 
 
-# =========================================================
-# CLASIFICAR HH / LH
-# =========================================================
+# ============================================================
+# ESTRUCTURA
+# ============================================================
 
-def clasificar_maximos(highs):
+def evaluar_estructura(df):
 
-    resultado = []
+    highs, lows = ultimos_pivots(df)
 
-    anteriores = []
+    if len(highs) < 3 or len(lows) < 3:
 
-    for swing in highs:
+        return {
+            "regimen": "INDEFINIDO",
+            "estructura": "SIN_DATOS",
+            "bos_alcista": False,
+            "bos_bajista": False,
+            "choch_alcista": False,
+            "choch_bajista": False,
+            "swing_high": None,
+            "swing_low": None
+        }
 
-        precio = swing["price"]
+    h1 = highs[-1]
+    h2 = highs[-2]
+    h3 = highs[-3]
 
-        if not anteriores:
+    l1 = lows[-1]
+    l2 = lows[-2]
+    l3 = lows[-3]
 
-            etiqueta = "H"
+    hh = h1 > h2
+    hl = l1 > l2
 
-        else:
+    lh = h1 < h2
+    ll = l1 < l2
 
-            anterior = (
-                anteriores[-1]["price"]
-            )
+    regimen = "LATERAL"
+    estructura = "MIxta"
 
-            if precio > anterior:
-                etiqueta = "HH"
+    if hh and hl:
 
-            else:
-                etiqueta = "LH"
+        regimen = "ALCISTA"
+        estructura = "HH + HL"
 
-        resultado.append({
-            **swing,
-            "tipo": etiqueta
-        })
+    elif lh and ll:
 
-        anteriores.append(
-            swing
-        )
+        regimen = "BAJISTA"
+        estructura = "LH + LL"
 
-    return resultado
+    elif hh and ll:
 
+        regimen = "TRANSICION"
 
-# =========================================================
-# CLASIFICAR HL / LL
-# =========================================================
+    elif lh and hl:
 
-def clasificar_minimos(lows):
+        regimen = "TRANSICION"
 
-    resultado = []
-
-    anteriores = []
-
-    for swing in lows:
-
-        precio = swing["price"]
-
-        if not anteriores:
-
-            etiqueta = "L"
-
-        else:
-
-            anterior = (
-                anteriores[-1]["price"]
-            )
-
-            if precio > anterior:
-                etiqueta = "HL"
-
-            else:
-                etiqueta = "LL"
-
-        resultado.append({
-            **swing,
-            "tipo": etiqueta
-        })
-
-        anteriores.append(
-            swing
-        )
-
-    return resultado
-
-
-# =========================================================
-# ESTRUCTURA COMPLETA
-# =========================================================
-
-def analizar_estructura(df):
-
-    highs, lows = detectar_swings(
-        df
+    cierre = float(
+        df["close"].iloc[-1]
     )
 
-    highs = clasificar_maximos(
-        highs
+    swing_high = h1
+    swing_low = l1
+
+    bos_alcista = (
+        cierre > h2
     )
 
-    lows = clasificar_minimos(
-        lows
+    bos_bajista = (
+        cierre < l2
     )
+
+    choch_alcista = (
+        regimen == "TRANSICION"
+        and cierre > h2
+    )
+
+    choch_bajista = (
+        regimen == "TRANSICION"
+        and cierre < l2
+    )
+
+    return {
+        "regimen": regimen,
+        "estructura": estructura,
+        "bos_alcista": bos_alcista,
+        "bos_bajista": bos_bajista,
+        "choch_alcista": choch_alcista,
+        "choch_bajista": choch_bajista,
+        "swing_high": swing_high,
+        "swing_low": swing_low,
+        "hh": hh,
+        "hl": hl,
+        "lh": lh,
+        "ll": ll
+    }
+
+
+# ============================================================
+# MOMENTUM
+# ============================================================
+
+def evaluar_momentum(df):
+
+    ult = df.iloc[-1]
+
+    cierre = float(
+        ult["close"]
+    )
+
+    apertura = float(
+        ult["open"]
+    )
+
+    high = float(
+        ult["high"]
+    )
+
+    low = float(
+        ult["low"]
+    )
+
+    atr = float(
+        ult["atr"]
+    )
+
+    rsi = float(
+        ult["rsi"]
+    )
+
+    adx = float(
+        ult["adx"]
+    )
+
+    di_plus = float(
+        ult["di_plus"]
+    )
+
+    di_minus = float(
+        ult["di_minus"]
+    )
+
+    rango = high - low
+
+    cuerpo = abs(
+        cierre - apertura
+    )
+
+    vela_alcista = (
+        cierre > apertura
+    )
+
+    vela_bajista = (
+        cierre < apertura
+    )
+
+    impulso_alcista = (
+        vela_alcista
+        and atr > 0
+        and cuerpo >= atr * 0.45
+        and rango >= atr * 0.70
+    )
+
+    impulso_bajista = (
+        vela_bajista
+        and atr > 0
+        and cuerpo >= atr * 0.45
+        and rango >= atr * 0.70
+    )
+
+    momentum_alcista = (
+        rsi >= RSI_COMPRA
+        and di_plus > di_minus
+    )
+
+    momentum_bajista = (
+        rsi <= RSI_VENTA
+        and di_minus > di_plus
+    )
+
+    return {
+        "precio": cierre,
+        "atr": atr,
+        "rsi": rsi,
+        "adx": adx,
+        "di_plus": di_plus,
+        "di_minus": di_minus,
+        "cuerpo": cuerpo,
+        "rango": rango,
+        "vela_alcista": vela_alcista,
+        "vela_bajista": vela_bajista,
+        "impulso_alcista": impulso_alcista,
+        "impulso_bajista": impulso_bajista,
+        "momentum_alcista": momentum_alcista,
+        "momentum_bajista": momentum_bajista
+    }
+
+
+# ============================================================
+# PULLBACK
+# ============================================================
+
+def detectar_pullback(
+    df,
+    estructura,
+    momentum
+):
+
+    precio = momentum["precio"]
+
+    atr = momentum["atr"]
+
+    if atr <= 0:
+
+        return {
+            "pullback_compra": False,
+            "pullback_venta": False
+        }
+
+    highs, lows = ultimos_pivots(df)
 
     if not highs or not lows:
 
         return {
-            "direccion": "NEUTRAL",
-            "estructura": "SIN_DATOS",
-            "bos": None,
-            "choch": None,
-            "highs": highs,
-            "lows": lows
+            "pullback_compra": False,
+            "pullback_venta": False
         }
 
-    ultimos_highs = highs[-4:]
-    ultimos_lows = lows[-4:]
+    swing_high = highs[-1]
+    swing_low = lows[-1]
 
-    tipos_high = [
-        x["tipo"]
-        for x in ultimos_highs
-    ]
-
-    tipos_low = [
-        x["tipo"]
-        for x in ultimos_lows
-    ]
-
-    alcista = (
-        "HH" in tipos_high
-        and
-        "HL" in tipos_low
+    distancia_low = (
+        abs(precio - swing_low)
     )
 
-    bajista = (
-        "LH" in tipos_high
-        and
-        "LL" in tipos_low
+    distancia_high = (
+        abs(precio - swing_high)
     )
 
-    if alcista:
-        direccion = "ALCISTA"
+    # Pullback comprador:
+    # precio retrocede hacia el último mínimo
+    # pero mantiene estructura alcista.
 
-    elif bajista:
-        direccion = "BAJISTA"
-
-    else:
-        direccion = "LATERAL"
-
-    precio = float(
-        df["close"].iloc[-1]
+    pullback_compra = (
+        estructura["regimen"] == "ALCISTA"
+        and distancia_low <= atr * 2.0
+        and precio >= swing_low
     )
 
-    ultimo_high = (
-        highs[-1]["price"]
-    )
+    # Pullback vendedor:
+    # precio retrocede hacia el último máximo
+    # pero mantiene estructura bajista.
 
-    ultimo_low = (
-        lows[-1]["price"]
-    )
-
-    penultimo_high = (
-        highs[-2]["price"]
-        if len(highs) >= 2
-        else ultimo_high
-    )
-
-    penultimo_low = (
-        lows[-2]["price"]
-        if len(lows) >= 2
-        else ultimo_low
-    )
-
-    # -----------------------------------------------------
-    # BOS
-    # -----------------------------------------------------
-
-    bos = None
-
-    if precio > ultimo_high:
-
-        bos = "BOS_ALCISTA"
-
-    elif precio < ultimo_low:
-
-        bos = "BOS_BAJISTA"
-
-    # -----------------------------------------------------
-    # CHOCH
-    # -----------------------------------------------------
-
-    choch = None
-
-    if (
-        precio > penultimo_high
-        and direccion == "BAJISTA"
-    ):
-
-        choch = "CHOCH_ALCISTA"
-
-    elif (
-        precio < penultimo_low
-        and direccion == "ALCISTA"
-    ):
-
-        choch = "CHOCH_BAJISTA"
-
-    estructura = (
-        f"Highs:{tipos_high[-3:]} "
-        f"Lows:{tipos_low[-3:]}"
+    pullback_venta = (
+        estructura["regimen"] == "BAJISTA"
+        and distancia_high <= atr * 2.0
+        and precio <= swing_high
     )
 
     return {
-        "direccion": direccion,
-        "estructura": estructura,
-        "bos": bos,
-        "choch": choch,
-        "highs": highs,
-        "lows": lows
+        "pullback_compra": pullback_compra,
+        "pullback_venta": pullback_venta
     }
 
 
-# =========================================================
-# ZONAS DE LIQUIDEZ
-# =========================================================
-
-def detectar_liquidez(df):
-
-    highs, lows = detectar_swings(
-        df,
-        izquierda=2,
-        derecha=2
-    )
-
-    if not highs and not lows:
-
-        return {
-            "liquidez_alta": [],
-            "liquidez_baja": []
-        }
-
-    ultimos_highs = [
-        x["price"]
-        for x in highs[-6:]
-    ]
-
-    ultimos_lows = [
-        x["price"]
-        for x in lows[-6:]
-    ]
-
-    return {
-        "liquidez_alta": ultimos_highs,
-        "liquidez_baja": ultimos_lows
-        }
-
-
-# =========================================================
-# CONTEXTO DE MOMENTUM
-# =========================================================
-
-def analizar_momentum(df):
-
-    fila = ultima_fila(
-        df
-    )
-
-    if fila is None:
-
-        return {
-            "rsi": np.nan,
-            "adx": np.nan,
-            "plus_di": np.nan,
-            "minus_di": np.nan,
-            "ema20": np.nan,
-            "ema50": np.nan,
-            "ema200": np.nan,
-            "atr": np.nan,
-            "momentum": "NEUTRAL"
-        }
-
-    rsi = numero(
-        fila.get("rsi")
-    )
-
-    adx = numero(
-        fila.get("adx")
-    )
-
-    plus_di = numero(
-        fila.get("plus_di")
-    )
-
-    minus_di = numero(
-        fila.get("minus_di")
-    )
-
-    ema20 = numero(
-        fila.get("ema20")
-    )
-
-    ema50 = numero(
-        fila.get("ema50")
-    )
-
-    ema200 = numero(
-        fila.get("ema200")
-    )
-
-    close = numero(
-        fila.get("close")
-    )
-
-    # -----------------------------------------------------
-    # MOMENTUM
-    # -----------------------------------------------------
-
-    if (
-        rsi >= RSI_CONFIRMACION_COMPRA
-        and plus_di > minus_di
-    ):
-
-        momentum = "ALCISTA"
-
-    elif (
-        rsi <= RSI_CONFIRMACION_VENTA
-        and minus_di > plus_di
-    ):
-
-        momentum = "BAJISTA"
-
-    else:
-
-        momentum = "NEUTRAL"
-
-    return {
-        "rsi": rsi,
-        "adx": adx,
-        "plus_di": plus_di,
-        "minus_di": minus_di,
-        "ema20": ema20,
-        "ema50": ema50,
-        "ema200": ema200,
-        "atr": numero(
-            fila.get("atr")
-        ),
-        "close": close,
-        "momentum": momentum
-    }
-
-
-# =========================================================
-# RÉGIMEN 15M
-# =========================================================
-
-def obtener_regimen(
-    df15
-):
-
-    estructura = analizar_estructura(
-        df15
-    )
-
-    momentum = analizar_momentum(
-        df15
-    )
-
-    direccion = (
-        estructura["direccion"]
-    )
-
-    mom = (
-        momentum["momentum"]
-    )
-
-    if (
-        direccion == "ALCISTA"
-        and mom == "ALCISTA"
-    ):
-
-        return "ALCISTA"
-
-    if (
-        direccion == "BAJISTA"
-        and mom == "BAJISTA"
-    ):
-
-        return "BAJISTA"
-
-    return "LATERAL"
-
-
-# =========================================================
-# DETECTAR IMPULSO
-# =========================================================
-
-def detectar_impulso(
-    df,
-    direccion
-):
-
-    if len(df) < 8:
-
-        return False
-
-    recientes = df.iloc[-6:]
-
-    atr = numero(
-        df["atr"].iloc[-1]
-    )
-
-    if not np.isfinite(atr) or atr <= 0:
-
-        return False
-
-    movimiento = (
-        recientes["close"].iloc[-1]
-        -
-        recientes["open"].iloc[0]
-    )
-
-    cuerpos = (
-        recientes["body_abs"]
-        .tail(4)
-        .mean()
-    )
-
-    if direccion == "COMPRA":
-
-        return (
-            movimiento > atr * 0.80
-            and
-            cuerpos > atr * 0.15
-        )
-
-    if direccion == "VENTA":
-
-        return (
-            movimiento < -atr * 0.80
-            and
-            cuerpos > atr * 0.15
-        )
-
-    return False
-
-
-# =========================================================
-# DETECTAR PULLBACK
-# =========================================================
-
-def detectar_pullback(
-    df,
-    direccion
-):
-
-    if len(df) < 8:
-
-        return False
-
-    recientes = df.iloc[-5:]
-
-    atr = numero(
-        df["atr"].iloc[-1]
-    )
-
-    if not np.isfinite(atr) or atr <= 0:
-
-        return False
-
-    maximo = (
-        recientes["high"].max()
-    )
-
-    minimo = (
-        recientes["low"].min()
-    )
-
-    cierre = (
-        recientes["close"].iloc[-1]
-    )
-
-    if direccion == "COMPRA":
-
-        distancia = (
-            maximo - cierre
-        )
-
-        return (
-            distancia > atr * 0.15
-            and
-            distancia < atr * 1.20
-        )
-
-    if direccion == "VENTA":
-
-        distancia = (
-            cierre - minimo
-        )
-
-        return (
-            distancia > atr * 0.15
-            and
-            distancia < atr * 1.20
-        )
-
-    return False
-
-
-# =========================================================
-# VELA DE CONTINUACIÓN
-# =========================================================
+# ============================================================
+# CONTINUACIÓN
+# ============================================================
 
 def detectar_continuacion(
     df,
-    direccion
+    momentum
 ):
 
-    if len(df) < 3:
-
-        return False
-
-    ultima = df.iloc[-1]
+    ult = df.iloc[-1]
 
     anterior = df.iloc[-2]
 
-    atr = numero(
-        ultima["atr"]
+    close = float(
+        ult["close"]
     )
 
-    if not np.isfinite(atr) or atr <= 0:
-
-        return False
-
-    cuerpo = abs(
-        ultima["close"]
-        - ultima["open"]
+    open_ = float(
+        ult["open"]
     )
 
-    if cuerpo < atr * 0.20:
+    high = float(
+        ult["high"]
+    )
 
-        return False
+    low = float(
+        ult["low"]
+    )
 
-    if direccion == "COMPRA":
+    prev_high = float(
+        anterior["high"]
+    )
 
-        return (
-            ultima["close"]
-            > ultima["open"]
-            and
-            ultima["close"]
-            > anterior["high"]
-        )
+    prev_low = float(
+        anterior["low"]
+    )
 
-    if direccion == "VENTA":
+    atr = momentum["atr"]
 
-        return (
-            ultima["close"]
-            < ultima["open"]
-            and
-            ultima["close"]
-            < anterior["low"]
-        )
+    continuacion_compra = (
+        close > prev_high
+        and close > open_
+        and (high - low) >= atr * 0.45
+    )
 
-    return False
+    continuacion_venta = (
+        close < prev_low
+        and close < open_
+        and (high - low) >= atr * 0.45
+    )
+
+    return {
+        "continuacion_compra":
+            continuacion_compra,
+
+        "continuacion_venta":
+            continuacion_venta
+    }
 
 
-# =========================================================
+# ============================================================
 # SCORE
-# =========================================================
+# ============================================================
 
-def calcular_score(
-    direccion,
-    estructura5,
-    estructura15,
-    momentum5,
-    momentum15,
-    impulso,
+def calcular_score_compra(
+    estructura,
+    momentum,
     pullback,
     continuacion
 ):
 
     score = 0
-
     razones = []
 
-    # -----------------------------------------------------
-    # ESTRUCTURA 5M
-    # -----------------------------------------------------
+    if estructura["regimen"] == "ALCISTA":
 
-    if direccion == "COMPRA":
+        score += 25
+        razones.append(
+            "estructura alcista"
+        )
 
-        if estructura5["direccion"] == "ALCISTA":
-
-            score += 20
-            razones.append(
-                "Estructura 5M alcista"
-            )
-
-        if estructura5["bos"] == "BOS_ALCISTA":
-
-            score += 12
-            razones.append(
-                "BOS alcista"
-            )
-
-        if estructura5["choch"] == "CHOCH_ALCISTA":
-
-            score += 8
-            razones.append(
-                "CHoCH alcista"
-            )
-
-    elif direccion == "VENTA":
-
-        if estructura5["direccion"] == "BAJISTA":
-
-            score += 20
-            razones.append(
-                "Estructura 5M bajista"
-            )
-
-        if estructura5["bos"] == "BOS_BAJISTA":
-
-            score += 12
-            razones.append(
-                "BOS bajista"
-            )
-
-        if estructura5["choch"] == "CHOCH_BAJISTA":
-
-            score += 8
-            razones.append(
-                "CHoCH bajista"
-            )
-
-    # -----------------------------------------------------
-    # CONTEXTO 15M
-    # -----------------------------------------------------
-
-    if (
-        direccion == "COMPRA"
-        and
-        estructura15["direccion"]
-        == "ALCISTA"
-    ):
+    if estructura["bos_alcista"]:
 
         score += 15
-
         razones.append(
-            "Contexto 15M alcista"
+            "BOS alcista"
         )
 
-    elif (
-        direccion == "VENTA"
-        and
-        estructura15["direccion"]
-        == "BAJISTA"
-    ):
-
-        score += 15
-
-        razones.append(
-            "Contexto 15M bajista"
-        )
-
-    # -----------------------------------------------------
-    # MOMENTUM
-    # -----------------------------------------------------
-
-    if (
-        direccion == "COMPRA"
-        and
-        momentum5["momentum"]
-        == "ALCISTA"
-    ):
-
-        score += 12
-
-        razones.append(
-            "Momentum 5M alcista"
-        )
-
-    elif (
-        direccion == "VENTA"
-        and
-        momentum5["momentum"]
-        == "BAJISTA"
-    ):
-
-        score += 12
-
-        razones.append(
-            "Momentum 5M bajista"
-        )
-
-    # -----------------------------------------------------
-    # ADX
-    # -----------------------------------------------------
-
-    adx = momentum5["adx"]
-
-    if np.isfinite(adx):
-
-        if adx >= ADX_MINIMO:
-
-            score += 6
-
-            razones.append(
-                f"ADX {adx:.1f}"
-            )
-
-    # -----------------------------------------------------
-    # IMPULSO
-    # -----------------------------------------------------
-
-    if impulso:
+    if estructura["choch_alcista"]:
 
         score += 10
-
         razones.append(
-            "Impulso detectado"
+            "CHoCH alcista"
         )
 
-    # -----------------------------------------------------
-    # PULLBACK
-    # -----------------------------------------------------
-
-    if pullback:
-
-        score += 10
-
-        razones.append(
-            "Pullback detectado"
-        )
-
-    # -----------------------------------------------------
-    # CONTINUACIÓN
-    # -----------------------------------------------------
-
-    if continuacion:
+    if momentum["impulso_alcista"]:
 
         score += 15
-
         razones.append(
-            "Continuación detectada"
+            "impulso alcista"
         )
 
-    return min(
-        score,
-        100
-    ), razones
+    if momentum["momentum_alcista"]:
+
+        score += 10
+        razones.append(
+            "momentum comprador"
+        )
+
+    if momentum["adx"] >= ADX_MINIMO:
+
+        score += 10
+        razones.append(
+            "ADX válido"
+        )
+
+    if pullback["pullback_compra"]:
+
+        score += 10
+        razones.append(
+            "pullback válido"
+        )
+
+    if continuacion["continuacion_compra"]:
+
+        score += 15
+        razones.append(
+            "continuación confirmada"
+        )
+
+    return min(score, 100), razones
 
 
-# =========================================================
-# DIRECCIÓN CANDIDATA
-# =========================================================
-
-def determinar_direccion(
-    estructura5,
-    estructura15,
-    momentum5
+def calcular_score_venta(
+    estructura,
+    momentum,
+    pullback,
+    continuacion
 ):
 
-    # -----------------------------------------------------
-    # COMPRA
-    # -----------------------------------------------------
+    score = 0
+    razones = []
 
-    compra = 0
+    if estructura["regimen"] == "BAJISTA":
 
-    if (
-        estructura5["direccion"]
-        == "ALCISTA"
-    ):
+        score += 25
+        razones.append(
+            "estructura bajista"
+        )
 
-        compra += 2
+    if estructura["bos_bajista"]:
 
-    if (
-        estructura15["direccion"]
-        == "ALCISTA"
-    ):
+        score += 15
+        razones.append(
+            "BOS bajista"
+        )
 
-        compra += 2
+    if estructura["choch_bajista"]:
 
-    if (
-        momentum5["momentum"]
-        == "ALCISTA"
-    ):
+        score += 10
+        razones.append(
+            "CHoCH bajista"
+        )
 
-        compra += 1
+    if momentum["impulso_bajista"]:
 
-    # -----------------------------------------------------
-    # VENTA
-    # -----------------------------------------------------
+        score += 15
+        razones.append(
+            "impulso bajista"
+        )
 
-    venta = 0
+    if momentum["momentum_bajista"]:
 
-    if (
-        estructura5["direccion"]
-        == "BAJISTA"
-    ):
+        score += 10
+        razones.append(
+            "momentum vendedor"
+        )
 
-        venta += 2
+    if momentum["adx"] >= ADX_MINIMO:
 
-    if (
-        estructura15["direccion"]
-        == "BAJISTA"
-    ):
+        score += 10
+        razones.append(
+            "ADX válido"
+        )
 
-        venta += 2
+    if pullback["pullback_venta"]:
 
-    if (
-        momentum5["momentum"]
-        == "BAJISTA"
-    ):
+        score += 10
+        razones.append(
+            "pullback válido"
+        )
 
-        venta += 1
+    if continuacion["continuacion_venta"]:
 
-    if compra >= 3 and compra > venta:
+        score += 15
+        razones.append(
+            "continuación confirmada"
+        )
 
-        return "COMPRA"
-
-    if venta >= 3 and venta > compra:
-
-        return "VENTA"
-
-    return None
+    return min(score, 100), razones
 
 
-# =========================================================
-# NIVELES SL / TP
-# =========================================================
+# ============================================================
+# DISTANCIAS
+# ============================================================
 
 def calcular_niveles(
-    df,
-    direccion
+    direccion,
+    precio,
+    atr
 ):
-
-    precio = float(
-        df["close"].iloc[-1]
-    )
-
-    atr = float(
-        df["atr"].iloc[-1]
-    )
-
-    if not np.isfinite(atr) or atr <= 0:
-
-        return None
 
     if direccion == "COMPRA":
 
-        sl = (
-            precio
-            - atr * ATR_SL
+        sl = precio - (
+            atr * ATR_SL
         )
 
-        tp = (
-            precio
-            + atr * ATR_TP
-        )
-
-    elif direccion == "VENTA":
-
-        sl = (
-            precio
-            + atr * ATR_SL
-        )
-
-        tp = (
-            precio
-            - atr * ATR_TP
+        tp = precio + (
+            atr * ATR_TP
         )
 
     else:
 
-        return None
+        sl = precio + (
+            atr * ATR_SL
+        )
 
-    riesgo = abs(
+        tp = precio - (
+            atr * ATR_TP
+        )
+
+    distancia_sl = abs(
         precio - sl
     )
 
-    recompensa = abs(
+    distancia_tp = abs(
         tp - precio
     )
 
-    if riesgo <= 0:
+    if distancia_sl <= 0:
 
-        return None
+        rr = 0
 
-    rr = (
-        recompensa
-        / riesgo
+    else:
+
+        rr = (
+            distancia_tp /
+            distancia_sl
+        )
+
+    return (
+        sl,
+        tp,
+        rr
     )
 
-    return {
-        "precio": precio,
-        "sl": sl,
-        "tp": tp,
-        "atr": atr,
-        "rr": rr
-    }
 
-
-# =========================================================
+# ============================================================
 # VALIDAR RR
-# =========================================================
+# ============================================================
 
-def validar_rr(
-    niveles
+def rr_valido(rr):
+
+    return (
+        rr >= RR_MINIMO
+    )
+
+
+# ============================================================
+# FORMATO
+# ============================================================
+
+def precio_fmt(valor):
+
+    try:
+
+        return f"{float(valor):.2f}"
+
+    except Exception:
+
+        return "N/D"
+
+
+def numero_fmt(valor):
+
+    try:
+
+        return f"{float(valor):.2f}"
+
+    except Exception:
+
+        return "N/D"
+
+
+# ============================================================
+# ID DE SEÑAL
+# ============================================================
+
+def generar_id(
+    direccion,
+    precio
 ):
 
-    if not niveles:
+    bloque = int(
+        time.time() // 900
+    )
+
+    return (
+        f"{direccion}-"
+        f"{bloque}-"
+        f"{round(precio, 2)}"
+    )
+
+
+# ============================================================
+# COOLDOWN
+# ============================================================
+
+def cooldown_activo():
+
+    global ultima_alerta_timestamp
+
+    if not ultima_alerta_timestamp:
 
         return False
 
+    transcurrido = (
+        time.time()
+        - ultima_alerta_timestamp
+    )
+
     return (
-        niveles["rr"]
-        >= RR_MINIMO
+        transcurrido
+        < MINUTOS_REPETICION * 60
     )
 
 
-# =========================================================
-# CREAR SETUP
-# =========================================================
+# ============================================================
+# GUARDAR PREALERTA
+# ============================================================
 
-def crear_setup(
+def guardar_prealerta(
     direccion,
-    df5,
-    estructura5,
-    estructura15,
-    momentum5,
-    momentum15,
+    precio,
+    atr,
     score,
-    razones
+    estructura,
+    momentum
 ):
 
-    niveles = calcular_niveles(
-        df5,
-        direccion
+    global estado_prealerta
+    global ultima_alerta_timestamp
+    global ultima_alerta_id
+
+    identificador = generar_id(
+        direccion,
+        precio
     )
 
-    if not niveles:
-
-        return None
-
-    if not validar_rr(
-        niveles
-    ):
-
-        return None
-
-    precio = niveles["precio"]
-
-    return {
-        "id": nuevo_id(),
-        "estado": "PREALERTA",
+    estado_prealerta = {
+        "id": identificador,
         "direccion": direccion,
-
-        "creado": ahora_utc().isoformat(),
-
-        "precio_prealerta": precio,
-
-        "sl": niveles["sl"],
-        "tp": niveles["tp"],
-        "atr": niveles["atr"],
-        "rr": niveles["rr"],
-
-        "score_prealerta": score,
-
-        "razones": razones,
-
-        "estructura5": (
-            estructura5["direccion"]
-        ),
-
-        "estructura15": (
-            estructura15["direccion"]
-        ),
-
-        "momentum5": (
-            momentum5["momentum"]
-        ),
-
-        "momentum15": (
-            momentum15["momentum"]
-        ),
-
-        "rsi": momentum5["rsi"],
-        "adx": momentum5["adx"],
-
-        "ultimo_precio": precio
+        "precio": precio,
+        "atr": atr,
+        "score": score,
+        "timestamp": time.time(),
+        "regimen": estructura["regimen"],
+        "rsi": momentum["rsi"],
+        "adx": momentum["adx"]
     }
 
+    ultima_alerta_id = identificador
+    ultima_alerta_timestamp = time.time()
 
-# =========================================================
-# FORMATEAR PREALERTA
-# =========================================================
+    return identificador
 
-def mensaje_prealerta(
-    setup
-):
 
-    direccion = setup[
-        "direccion"
-    ]
+# ============================================================
+# PREALERTA VIGENTE
+# ============================================================
 
-    emoji = (
-        "🟢"
-        if direccion == "COMPRA"
-        else "🔴"
+def prealerta_vigente():
+
+    if not estado_prealerta:
+
+        return False
+
+    edad = (
+        time.time()
+        - estado_prealerta["timestamp"]
     )
 
-    razones = setup.get(
-        "razones",
-        []
-    )
+    # Una prealerta vive como máximo
+    # 15 minutos.
 
-    razones_texto = "\n".join(
-        f"• {r}"
-        for r in razones[-6:]
-    )
+    if edad > MINUTOS_REPETICION * 60:
 
-    return (
-        f"🟡 PREALERTA XAU/USD\n\n"
+        return False
 
-        f"{emoji} POSIBLE "
-        f"{direccion}\n\n"
-
-        f"🆔 ID: "
-        f"{setup['id']}\n"
-
-        f"⭐ Score: "
-        f"{setup['score_prealerta']}/100\n\n"
-
-        f"💰 Precio: "
-        f"{setup['precio_prealerta']:.2f}\n"
-
-        f"🛑 SL referencia: "
-        f"{setup['sl']:.2f}\n"
-
-        f"🎯 TP referencia: "
-        f"{setup['tp']:.2f}\n"
-
-        f"📐 RR: "
-        f"{setup['rr']:.2f}\n\n"
-
-        f"📊 5M: "
-        f"{setup['estructura5']}\n"
-
-        f"📊 15M: "
-        f"{setup['estructura15']}\n"
-
-        f"⚡ Momentum: "
-        f"{setup['momentum5']}\n"
-
-        f"RSI: "
-        f"{setup['rsi']:.1f}\n"
-
-        f"ADX: "
-        f"{setup['adx']:.1f}\n\n"
-
-        f"🧠 Factores:\n"
-        f"{razones_texto}\n\n"
-
-        f"⚠️ PREALERTA\n"
-        f"La oportunidad todavía "
-        f"NO está confirmada.\n\n"
-
-        f"🔍 El motor seguirá vigilando "
-        f"este mismo setup."
-    )
+    return True
 
 
-# =========================================================
-# FORMATEAR CONFIRMACIÓN
-# =========================================================
+# ============================================================
+# DESCARTAR PREALERTA
+# ============================================================
 
-def mensaje_confirmada(
-    setup,
-    niveles,
-    score
-):
-
-    direccion = setup[
-        "direccion"
-    ]
-
-    emoji = (
-        "🟢"
-        if direccion == "COMPRA"
-        else "🔴"
-    )
-
-    return (
-        f"🟢 SEÑAL CONFIRMADA XAU/USD\n\n"
-
-        f"{emoji} {direccion}\n\n"
-
-        f"🆔 ID: "
-        f"{setup['id']}\n"
-
-        f"⭐ Score: "
-        f"{score}/100\n\n"
-
-        f"💰 Precio confirmación: "
-        f"{niveles['precio']:.2f}\n"
-
-        f"🛑 SL referencia: "
-        f"{niveles['sl']:.2f}\n"
-
-        f"🎯 TP referencia: "
-        f"{niveles['tp']:.2f}\n"
-
-        f"📐 RR: "
-        f"{niveles['rr']:.2f}\n\n"
-
-        f"📊 Estructura 5M: "
-        f"{setup['estructura5']}\n"
-
-        f"📊 Contexto 15M: "
-        f"{setup['estructura15']}\n"
-
-        f"⚡ Momentum: "
-        f"{setup['momentum5']}\n\n"
-
-        f"💥 Continuación confirmada.\n"
-        f"🧠 Setup evolucionó desde "
-        f"la prealerta."
-    )
-
-
-# =========================================================
-# FORMATEAR DESCARTADA
-# =========================================================
-
-def mensaje_descartada(
-    setup,
-    precio,
+def descartar_prealerta(
     motivo
 ):
 
-    direccion = setup[
-        "direccion"
-    ]
+    global estado_prealerta
 
-    emoji = (
-        "🟢"
-        if direccion == "COMPRA"
-        else "🔴"
-    )
+    anterior = estado_prealerta
 
-    return (
-        f"🔴 PREALERTA DESCARTADA\n\n"
+    estado_prealerta = None
 
-        f"{emoji} {direccion}\n"
+    if anterior is None:
 
-        f"🆔 ID: "
-        f"{setup['id']}\n\n"
+        return {
+            "tipo": "SIN_SEÑAL",
+            "mensaje": (
+                "😴 SIN_SEÑAL"
+            )
+        }
 
-        f"💰 Precio actual: "
-        f"{precio:.2f}\n\n"
+    return {
+        "tipo": "DESCARTADA",
+        "id": anterior["id"],
+        "mensaje": (
+            "🟠 XAU SNIPER AI V4.1\n\n"
+            "❌ PREALERTA DESCARTADA\n\n"
+            f"📌 Dirección: "
+            f"{anterior['direccion']}\n"
+            f"📊 Score inicial: "
+            f"{anterior['score']}/100\n\n"
+            f"🧠 Motivo:\n"
+            f"{motivo}\n\n"
+            "🔍 La estructura ya no cumple "
+            "las condiciones de continuación."
+        )
+    }
 
-        f"❌ Motivo:\n"
-        f"{motivo}\n\n"
 
-        f"🧠 El setup quedó invalidado.\n"
-        f"No se convertirá en confirmación."
-    )
+# ============================================================
+# VALIDAR CONFIRMACIÓN
+# ============================================================
 
-
-# =========================================================
-# VALIDAR SETUP ACTIVO
-# =========================================================
-
-def evaluar_setup_activo(
-    setup,
+def confirmar_prealerta(
     df5,
     df15,
     estructura5,
     estructura15,
     momentum5,
-    momentum15
+    continuacion5
 ):
 
-    precio = float(
-        df5["close"].iloc[-1]
-    )
+    if not prealerta_vigente():
 
-    direccion = setup[
-        "direccion"
-    ]
+        return None
 
-    # -----------------------------------------------------
-    # ACTUALIZAR PRECIO
-    # -----------------------------------------------------
+    p = estado_prealerta
 
-    setup[
-        "ultimo_precio"
-    ] = precio
+    direccion = p["direccion"]
 
-    # -----------------------------------------------------
-    # INVALIDACIÓN POR SL
-    # -----------------------------------------------------
-
-    if direccion == "COMPRA":
-
-        if precio <= setup["sl"]:
-
-            return {
-                "estado": "DESCARTADA",
-                "motivo":
-                    "El precio alcanzó "
-                    "la zona de invalidación."
-            }
-
-    elif direccion == "VENTA":
-
-        if precio >= setup["sl"]:
-
-            return {
-                "estado": "DESCARTADA",
-                "motivo":
-                    "El precio alcanzó "
-                    "la zona de invalidación."
-            }
-
-    # -----------------------------------------------------
-    # CONTEXTO 15M INVALIDADO
-    # -----------------------------------------------------
-
-    if direccion == "COMPRA":
-
-        if (
-            estructura15["direccion"]
-            == "BAJISTA"
-        ):
-
-            return {
-                "estado": "DESCARTADA",
-                "motivo":
-                    "El contexto 15M "
-                    "cambió a bajista."
-            }
-
-    if direccion == "VENTA":
-
-        if (
-            estructura15["direccion"]
-            == "ALCISTA"
-        ):
-
-            return {
-                "estado": "DESCARTADA",
-                "motivo":
-                    "El contexto 15M "
-                    "cambió a alcista."
-            }
-
-    # -----------------------------------------------------
-    # MOMENTUM
-    # -----------------------------------------------------
+    precio = momentum5["precio"]
 
     rsi = momentum5["rsi"]
 
-    if direccion == "COMPRA":
-
-        if (
-            np.isfinite(rsi)
-            and
-            rsi < RSI_VENTA
-        ):
-
-            return {
-                "estado": "DESCARTADA",
-                "motivo":
-                    f"RSI cayó a "
-                    f"{rsi:.1f}."
-            }
-
-    if direccion == "VENTA":
-
-        if (
-            np.isfinite(rsi)
-            and
-            rsi > RSI_COMPRA
-        ):
-
-            return {
-                "estado": "DESCARTADA",
-                "motivo":
-                    f"RSI subió a "
-                    f"{rsi:.1f}."
-            }
-
-    # -----------------------------------------------------
-    # CONFIRMACIÓN
-    # -----------------------------------------------------
-
-    continuacion = (
-        detectar_continuacion(
-            df5,
-            direccion
-        )
-    )
-
     adx = momentum5["adx"]
 
-    adx_ok = (
-        np.isfinite(adx)
-        and
-        adx >= ADX_MINIMO
-    )
-
-    rsi_ok = False
-
     if direccion == "COMPRA":
 
-        rsi_ok = (
-            np.isfinite(rsi)
+        confirmada = (
+            estructura5["regimen"] == "ALCISTA"
             and
-            rsi >=
-            RSI_CONFIRMACION_COMPRA
-        )
-
-    elif direccion == "VENTA":
-
-        rsi_ok = (
-            np.isfinite(rsi)
+            estructura15["regimen"]
+            in ["ALCISTA", "TRANSICION"]
             and
-            rsi <=
-            RSI_CONFIRMACION_VENTA
+            continuacion5[
+                "continuacion_compra"
+            ]
+            and
+            rsi >= RSI_CONFIRMACION_COMPRA
+            and
+            adx >= ADX_MINIMO
+            and
+            precio >= p["precio"]
         )
 
-    contexto_ok = False
-
-    if direccion == "COMPRA":
-
-        contexto_ok = (
-            estructura15["direccion"]
-            == "ALCISTA"
-        )
-
-    elif direccion == "VENTA":
-
-        contexto_ok = (
-            estructura15["direccion"]
-            == "BAJISTA"
-        )
-
-    estructura_ok = False
-
-    if direccion == "COMPRA":
-
-        estructura_ok = (
-            estructura5["direccion"]
-            == "ALCISTA"
-            or
-            estructura5["bos"]
-            == "BOS_ALCISTA"
-            or
-            estructura5["choch"]
-            == "CHOCH_ALCISTA"
-        )
-
-    elif direccion == "VENTA":
-
-        estructura_ok = (
-            estructura5["direccion"]
+        invalidada = (
+            estructura5["regimen"]
             == "BAJISTA"
             or
-            estructura5["bos"]
-            == "BOS_BAJISTA"
+            precio < (
+                p["precio"]
+                - p["atr"] * 0.80
+            )
+        )
+
+    else:
+
+        confirmada = (
+            estructura5["regimen"] == "BAJISTA"
+            and
+            estructura15["regimen"]
+            in ["BAJISTA", "TRANSICION"]
+            and
+            continuacion5[
+                "continuacion_venta"
+            ]
+            and
+            rsi <= RSI_CONFIRMACION_VENTA
+            and
+            adx >= ADX_MINIMO
+            and
+            precio <= p["precio"]
+        )
+
+        invalidada = (
+            estructura5["regimen"]
+            == "ALCISTA"
             or
-            estructura5["choch"]
-            == "CHOCH_BAJISTA"
+            precio > (
+                p["precio"]
+                + p["atr"] * 0.80
+            )
         )
 
-    # -----------------------------------------------------
-    # SCORE DE CONFIRMACIÓN
-    # -----------------------------------------------------
+    if invalidada:
 
-    score = 0
-
-    if estructura_ok:
-        score += 25
-
-    if contexto_ok:
-        score += 20
-
-    if continuacion:
-        score += 25
-
-    if rsi_ok:
-        score += 15
-
-    if adx_ok:
-        score += 15
-
-    score = min(
-        score,
-        100
-    )
-
-    # -----------------------------------------------------
-    # CONFIRMADA
-    # -----------------------------------------------------
-
-    if (
-        score >= MIN_SCORE_CONFIRMACION
-        and
-        continuacion
-        and
-        contexto_ok
-        and
-        rsi_ok
-    ):
-
-        niveles = calcular_niveles(
-            df5,
-            direccion
+        return descartar_prealerta(
+            "La dirección perdió "
+            "la estructura."
         )
 
-        if niveles and validar_rr(
-            niveles
-        ):
-
-            return {
-                "estado": "CONFIRMADA",
-                "niveles": niveles,
-                "score": score
-            }
-
-    # -----------------------------------------------------
-    # TODAVÍA VÁLIDA
-    # -----------------------------------------------------
-
-    return {
-        "estado": "PENDIENTE",
-        "score": score
-    }
-
-
-# =========================================================
-# CONSTRUIR PREALERTA
-# =========================================================
-
-def buscar_prealerta(
-    df5,
-    df15
-):
-
-    estructura5 = (
-        analizar_estructura(
-            df5
-        )
-    )
-
-    estructura15 = (
-        analizar_estructura(
-            df15
-        )
-    )
-
-    momentum5 = (
-        analizar_momentum(
-            df5
-        )
-    )
-
-    momentum15 = (
-        analizar_momentum(
-            df15
-        )
-    )
-
-    direccion = (
-        determinar_direccion(
-            estructura5,
-            estructura15,
-            momentum5
-        )
-    )
-
-    if direccion is None:
+    if not confirmada:
 
         return None
 
-    impulso = (
-        detectar_impulso(
-            df5,
-            direccion
-        )
-    )
-
-    pullback = (
-        detectar_pullback(
-            df5,
-            direccion
-        )
-    )
-
-    continuacion = (
-        detectar_continuacion(
-            df5,
-            direccion
-        )
-    )
-
-    score, razones = (
-        calcular_score(
-            direccion,
-            estructura5,
-            estructura15,
-            momentum5,
-            momentum15,
-            impulso,
-            pullback,
-            continuacion
-        )
-    )
-
-    # -----------------------------------------------------
-    # UNA PREALERTA REQUIERE ALGO MÁS QUE "EMA ARRIBA"
-    # -----------------------------------------------------
-
-    setup_valido = (
-        score >= MIN_SCORE_PREALERTA
-        and
-        (
-            impulso
-            or
-            pullback
-            or
-            estructura5["bos"]
-            is not None
-            or
-            estructura5["choch"]
-            is not None
-        )
-    )
-
-    if not setup_valido:
-
-        return None
-
-    setup = crear_setup(
-        direccion,
-        df5,
-        estructura5,
-        estructura15,
-        momentum5,
-        momentum15,
-        score,
-        razones
-    )
-
-    return setup
+    return True
 
 
-# =========================================================
-# DIAGNÓSTICO
-# =========================================================
+# ============================================================
+# MENSAJE PREALERTA
+# ============================================================
 
-def diagnostico(
-    df5,
-    df15
+def construir_prealerta(
+    direccion,
+    identificador,
+    precio,
+    sl,
+    tp,
+    rr,
+    score,
+    estructura5,
+    estructura15,
+    momentum5
 ):
 
-    estructura5 = (
-        analizar_estructura(
-            df5
-        )
+    emoji = (
+        "🟢"
+        if direccion == "COMPRA"
+        else "🔴"
     )
 
-    estructura15 = (
-        analizar_estructura(
-            df15
-        )
-    )
+    texto = (
+        f"{emoji} XAU SNIPER AI V4.1\n\n"
+        f"⚠️ PREALERTA "
+        f"{direccion}\n\n"
+        f"🆔 ID: {identificador}\n"
+        f"📊 Score: {score}/100\n"
+        f"💰 Precio: "
+        f"{precio_fmt(precio)}\n\n"
 
-    momentum5 = (
-        analizar_momentum(
-            df5
-        )
-    )
+        f"📈 5M: "
+        f"{estructura5['regimen']}\n"
+        f"📊 15M: "
+        f"{estructura15['regimen']}\n\n"
 
-    momentum15 = (
-        analizar_momentum(
-            df15
-        )
-    )
-
-    precio = float(
-        df5["close"].iloc[-1]
-    )
-
-    print(
-        "-----------------------------------"
-    )
-
-    print(
-        f"💰 Precio: {precio:.2f}"
-    )
-
-    print(
-        "📊 5M:",
-        estructura5["direccion"]
-    )
-
-    print(
-        "📊 15M:",
-        estructura15["direccion"]
-    )
-
-    print(
-        "⚡ Momentum 5M:",
-        momentum5["momentum"]
-    )
-
-    print(
         f"RSI 5M: "
-        f"{momentum5['rsi']:.2f}"
-    )
-
-    print(
+        f"{numero_fmt(momentum5['rsi'])}\n"
         f"ADX 5M: "
-        f"{momentum5['adx']:.2f}"
+        f"{numero_fmt(momentum5['adx'])}\n\n"
+
+        f"🛑 SL referencia: "
+        f"{precio_fmt(sl)}\n"
+        f"🎯 TP referencia: "
+        f"{precio_fmt(tp)}\n"
+        f"📐 RR: 1:{numero_fmt(rr)}\n\n"
+
+        "🧠 Estructura detectada.\n"
+        "🔄 Esperando pullback + "
+        "continuación.\n\n"
+
+        "⚠️ AÚN NO CONFIRMADA"
     )
 
-    print(
-        "⚡ Momentum 15M:",
-        momentum15["momentum"]
+    return texto
+
+
+# ============================================================
+# MENSAJE CONFIRMADO
+# ============================================================
+
+def construir_confirmacion(
+    direccion,
+    identificador,
+    precio,
+    sl,
+    tp,
+    rr,
+    score,
+    estructura5,
+    estructura15,
+    momentum5
+):
+
+    emoji = (
+        "🟢"
+        if direccion == "COMPRA"
+        else "🔴"
     )
 
-    print(
-        f"RSI 15M: "
-        f"{momentum15['rsi']:.2f}"
+    texto = (
+        f"{emoji} XAU SNIPER AI V4.1\n\n"
+        f"🔥 ALERTA CONFIRMADA: "
+        f"{direccion}\n\n"
+
+        f"🆔 ID: {identificador}\n"
+        f"📊 Score: {score}/100\n"
+        f"💰 Entrada referencia: "
+        f"{precio_fmt(precio)}\n\n"
+
+        f"📈 5M: "
+        f"{estructura5['regimen']}\n"
+        f"📊 15M: "
+        f"{estructura15['regimen']}\n\n"
+
+        f"RSI: "
+        f"{numero_fmt(momentum5['rsi'])}\n"
+        f"ADX: "
+        f"{numero_fmt(momentum5['adx'])}\n\n"
+
+        f"🛑 SL referencia: "
+        f"{precio_fmt(sl)}\n"
+        f"🎯 TP referencia: "
+        f"{precio_fmt(tp)}\n"
+        f"📐 RR: 1:{numero_fmt(rr)}\n\n"
+
+        "🚀 Impulso + Pullback + "
+        "Continuación detectados.\n\n"
+
+        "⚠️ PAPER / ESCÁNER"
     )
 
-    print(
-        f"ADX 15M: "
-        f"{momentum15['adx']:.2f}"
+    return texto
+
+
+# ============================================================
+# MENSAJE DIAGNÓSTICO
+# ============================================================
+
+def construir_diagnostico(
+    estructura5,
+    estructura15,
+    momentum5,
+    pullback5,
+    continuacion5
+):
+
+    return (
+        "📋 DIAGNÓSTICO XAU SNIPER\n\n"
+
+        f"5M: "
+        f"{estructura5['regimen']}\n"
+
+        f"15M: "
+        f"{estructura15['regimen']}\n\n"
+
+        f"RSI: "
+        f"{numero_fmt(momentum5['rsi'])}\n"
+
+        f"ADX: "
+        f"{numero_fmt(momentum5['adx'])}\n"
+
+        f"DI+: "
+        f"{numero_fmt(momentum5['di_plus'])}\n"
+
+        f"DI-: "
+        f"{numero_fmt(momentum5['di_minus'])}\n\n"
+
+        f"Pullback compra: "
+        f"{pullback5['pullback_compra']}\n"
+
+        f"Pullback venta: "
+        f"{pullback5['pullback_venta']}\n\n"
+
+        f"Continuación compra: "
+        f"{continuacion5['continuacion_compra']}\n"
+
+        f"Continuación venta: "
+        f"{continuacion5['continuacion_venta']}"
     )
 
-    print(
-        "-----------------------------------"
-    )
 
-
-# =========================================================
-# FUNCIÓN PRINCIPAL
-# =========================================================
-#
-# ESTA ES LA FUNCIÓN QUE BOT.PY IMPORTA:
-#
-# from strategy import analizar
-#
-# =========================================================
+# ============================================================
+# ANALIZAR 5M + 15M
+# ============================================================
 
 def analizar():
 
-    global SETUP_ACTIVO
+    global estado_prealerta
+    global ultima_confirmacion_id
+    global ultima_confirmacion_timestamp
 
     try:
 
         print(
-            "📡 Obteniendo datos desde BiQuote..."
+            "📡 Descargando datos desde BiQuote..."
         )
 
-        # -------------------------------------------------
-        # MERCADO
-        # -------------------------------------------------
-
-        df5, df15 = (
-            cargar_mercado()
+        df5 = obtener_ohlc(
+            INTERVALO_5M,
+            BARRAS_5M
         )
 
-        # -------------------------------------------------
+        df15 = obtener_ohlc(
+            INTERVALO_15M,
+            BARRAS_15M
+        )
+
+        print(
+            f"✅ BiQuote 5M: "
+            f"{len(df5)} velas"
+        )
+
+        print(
+            f"✅ BiQuote 15M: "
+            f"{len(df15)} velas"
+        )
+
+        # ----------------------------------------------------
         # INDICADORES
-        # -------------------------------------------------
+        # ----------------------------------------------------
 
-        df5 = calcular_indicadores(
+        df5 = agregar_indicadores(
             df5
         )
 
-        df15 = calcular_indicadores(
+        df15 = agregar_indicadores(
             df15
         )
 
-        if not validar_dataframe(
+        # ----------------------------------------------------
+        # ESTRUCTURA
+        # ----------------------------------------------------
+
+        df5 = detectar_pivots(
             df5
-        ):
+        )
 
-            return {
-                "tipo": "ERROR",
-                "id": None,
-                "mensaje":
-                    "❌ BiQuote: "
-                    "datos 5M insuficientes."
-            }
-
-        if not validar_dataframe(
+        df15 = detectar_pivots(
             df15
-        ):
+        )
 
-            return {
-                "tipo": "ERROR",
-                "id": None,
-                "mensaje":
-                    "❌ BiQuote: "
-                    "datos 15M insuficientes."
-            }
+        estructura5 = evaluar_estructura(
+            df5
+        )
 
-        # -------------------------------------------------
-        # DIAGNÓSTICO
-        # -------------------------------------------------
+        estructura15 = evaluar_estructura(
+            df15
+        )
 
-        diagnostico(
+        # ----------------------------------------------------
+        # MOMENTUM
+        # ----------------------------------------------------
+
+        momentum5 = evaluar_momentum(
+            df5
+        )
+
+        # ----------------------------------------------------
+        # PULLBACK
+        # ----------------------------------------------------
+
+        pullback5 = detectar_pullback(
             df5,
-            df15
+            estructura5,
+            momentum5
         )
 
-        # =================================================
-        # SI YA EXISTE PREALERTA
-        # =================================================
+        # ----------------------------------------------------
+        # CONTINUACIÓN
+        # ----------------------------------------------------
 
-        if SETUP_ACTIVO is not None:
+        continuacion5 = detectar_continuacion(
+            df5,
+            momentum5
+        )
+
+        print(
+            f"📊 5M: "
+            f"{estructura5['regimen']}"
+        )
+
+        print(
+            f"📊 15M: "
+            f"{estructura15['regimen']}"
+        )
+
+        print(
+            f"RSI: "
+            f"{momentum5['rsi']:.2f}"
+        )
+
+        print(
+            f"ADX: "
+            f"{momentum5['adx']:.2f}"
+        )
+
+        # ====================================================
+        # 1. COMPROBAR PREALERTA EXISTENTE
+        # ====================================================
+
+        if prealerta_vigente():
 
             print(
-                "🟡 Setup activo:",
-                SETUP_ACTIVO["id"]
+                "⚠️ PREALERTA ACTIVA:"
+                f" {estado_prealerta['id']}"
             )
 
-            estructura5 = (
-                analizar_estructura(
-                    df5
-                )
-            )
-
-            estructura15 = (
-                analizar_estructura(
-                    df15
-                )
-            )
-
-            momentum5 = (
-                analizar_momentum(
-                    df5
-                )
-            )
-
-            momentum15 = (
-                analizar_momentum(
-                    df15
-                )
-
-            )
-
-            evaluacion = (
-                evaluar_setup_activo(
-                    SETUP_ACTIVO,
+            confirmacion = (
+                confirmar_prealerta(
                     df5,
                     df15,
                     estructura5,
                     estructura15,
                     momentum5,
-                    momentum15
+                    continuacion5
                 )
             )
 
-            estado = (
-                evaluacion["estado"]
-            )
+            # ------------------------------------------------
+            # PREALERTA DESCARTADA
+            # ------------------------------------------------
 
-            # ---------------------------------------------
-            # CONFIRMADA
-            # ---------------------------------------------
+            if isinstance(
+                confirmacion,
+                dict
+            ):
 
-            if estado == "CONFIRMADA":
+                return confirmacion
 
-                niveles = (
-                    evaluacion["niveles"]
+            # ------------------------------------------------
+            # PREALERTA CONFIRMADA
+            # ------------------------------------------------
+
+            if confirmacion is True:
+
+                direccion = (
+                    estado_prealerta[
+                        "direccion"
+                    ]
+                )
+
+                precio = (
+                    momentum5["precio"]
+                )
+
+                atr = (
+                    momentum5["atr"]
                 )
 
                 score = (
-                    evaluacion["score"]
+                    0
                 )
 
-                mensaje = (
-                    mensaje_confirmada(
-                        SETUP_ACTIVO,
-                        niveles,
-                        score
+                if direccion == "COMPRA":
+
+                    score, _ = (
+                        calcular_score_compra(
+                            estructura5,
+                            momentum5,
+                            pullback5,
+                            continuacion5
+                        )
+                    )
+
+                else:
+
+                    score, _ = (
+                        calcular_score_venta(
+                            estructura5,
+                            momentum5,
+                            pullback5,
+                            continuacion5
+                        )
+                    )
+
+                sl, tp, rr = (
+                    calcular_niveles(
+                        direccion,
+                        precio,
+                        atr
                     )
                 )
 
+                if not rr_valido(rr):
+
+                    return descartar_prealerta(
+                        "RR insuficiente "
+                        "al confirmar."
+                    )
+
                 identificador = (
-                    SETUP_ACTIVO["id"]
+                    estado_prealerta["id"]
                 )
 
-                SETUP_ACTIVO = None
+                ultima_confirmacion_id = (
+                    identificador
+                )
+
+                ultima_confirmacion_timestamp = (
+                    time.time()
+                )
+
+                mensaje = (
+                    construir_confirmacion(
+                        direccion,
+                        identificador,
+                        precio,
+                        sl,
+                        tp,
+                        rr,
+                        score,
+                        estructura5,
+                        estructura15,
+                        momentum5
+                    )
+                )
+
+                estado_prealerta = None
 
                 print(
-                    "🟢 PREALERTA CONFIRMADA"
+                    "🔥 PREALERTA CONFIRMADA"
                 )
 
                 return {
@@ -2580,122 +1571,263 @@ def analizar():
                     "mensaje": mensaje
                 }
 
-            # ---------------------------------------------
-            # DESCARTADA
-            # ---------------------------------------------
+            # ------------------------------------------------
+            # TODAVÍA ESPERANDO
+            # ------------------------------------------------
 
-            if estado == "DESCARTADA":
+            print(
+                "⏳ Prealerta todavía "
+                "esperando confirmación."
+            )
 
-                precio = float(
-                    df5["close"].iloc[-1]
+            return {
+                "tipo": "SIN_SEÑAL",
+                "mensaje": (
+                    "⏳ Prealerta activa. "
+                    "Esperando continuación."
                 )
+            }
 
-                motivo = (
-                    evaluacion.get(
-                        "motivo",
-                        "Estructura invalidada."
-                    )
+        # ====================================================
+        # 2. SI HAY COOLDOWN, NO CREAR OTRA
+        # ====================================================
+
+        if cooldown_activo():
+
+            print(
+                "🧊 Cooldown activo."
+            )
+
+            return {
+                "tipo": "SIN_SEÑAL",
+                "mensaje": (
+                    "🧊 Cooldown activo."
                 )
+            }
 
-                identificador = (
-                    SETUP_ACTIVO["id"]
+        # ====================================================
+        # 3. CALCULAR SCORE
+        # ====================================================
+
+        score_compra, razones_compra = (
+            calcular_score_compra(
+                estructura5,
+                momentum5,
+                pullback5,
+                continuacion5
+            )
+        )
+
+        score_venta, razones_venta = (
+            calcular_score_venta(
+                estructura5,
+                momentum5,
+                pullback5,
+                continuacion5
+            )
+        )
+
+        # ====================================================
+        # 4. DETECTAR POSIBLE COMPRA
+        # ====================================================
+
+        setup_compra = (
+            estructura5["regimen"]
+            == "ALCISTA"
+            and
+            estructura15["regimen"]
+            in ["ALCISTA", "TRANSICION"]
+            and
+            momentum5["momentum_alcista"]
+            and
+            momentum5["adx"]
+            >= ADX_MINIMO
+            and
+            pullback5["pullback_compra"]
+        )
+
+        # ====================================================
+        # 5. DETECTAR POSIBLE VENTA
+        # ====================================================
+
+        setup_venta = (
+            estructura5["regimen"]
+            == "BAJISTA"
+            and
+            estructura15["regimen"]
+            in ["BAJISTA", "TRANSICION"]
+            and
+            momentum5["momentum_bajista"]
+            and
+            momentum5["adx"]
+            >= ADX_MINIMO
+            and
+            pullback5["pullback_venta"]
+            )
+
+
+        # ====================================================
+        # 6. CREAR PREALERTA COMPRA
+        # ====================================================
+
+        if (
+            setup_compra
+            and score_compra >= 55
+        ):
+
+            direccion = "COMPRA"
+
+            precio = momentum5["precio"]
+            atr = momentum5["atr"]
+
+            sl, tp, rr = (
+                calcular_niveles(
+                    direccion,
+                    precio,
+                    atr
                 )
+            )
 
-                mensaje = (
-                    mensaje_descartada(
-                        SETUP_ACTIVO,
-                        precio,
-                        motivo
-                    )
-                )
-
-                SETUP_ACTIVO = None
-
-                print(
-                    "🔴 PREALERTA DESCARTADA"
-                )
+            if not rr_valido(rr):
 
                 return {
-                    "tipo": "DESCARTADA",
-                    "id": identificador,
-                    "mensaje": mensaje
+                    "tipo": "SIN_SEÑAL",
+                    "mensaje": (
+                        "😴 Compra descartada: "
+                        "RR insuficiente."
+                    )
                 }
 
-            # ---------------------------------------------
-            # TODAVÍA PENDIENTE
-            # ---------------------------------------------
+            identificador = (
+                guardar_prealerta(
+                    direccion,
+                    precio,
+                    atr,
+                    score_compra,
+                    estructura5,
+                    momentum5
+                )
+            )
+
+            mensaje = (
+                construir_prealerta(
+                    direccion,
+                    identificador,
+                    precio,
+                    sl,
+                    tp,
+                    rr,
+                    score_compra,
+                    estructura5,
+                    estructura15,
+                    momentum5
+                )
+            )
 
             print(
-                "🟡 Setup sigue pendiente:"
-                f" {SETUP_ACTIVO['id']}"
+                "⚠️ NUEVA PREALERTA COMPRA"
             )
 
             return {
-                "tipo": "SIN_SEÑAL",
-                "id": SETUP_ACTIVO["id"],
-                "mensaje":
-                    "🟡 Setup activo. "
-                    "Esperando confirmación."
+                "tipo": "PREALERTA",
+                "id": identificador,
+                "mensaje": mensaje
             }
 
-        # =================================================
-        # NO EXISTE SETUP
-        # BUSCAR PREALERTA
-        # =================================================
+        # ====================================================
+        # 7. CREAR PREALERTA VENTA
+        # ====================================================
 
-        setup = (
-            buscar_prealerta(
-                df5,
-                df15
+        if (
+            setup_venta
+            and score_venta >= 55
+        ):
+
+            direccion = "VENTA"
+
+            precio = momentum5["precio"]
+            atr = momentum5["atr"]
+
+            sl, tp, rr = (
+                calcular_niveles(
+                    direccion,
+                    precio,
+                    atr
+                )
             )
-        )
 
-        if setup is None:
+            if not rr_valido(rr):
+
+                return {
+                    "tipo": "SIN_SEÑAL",
+                    "mensaje": (
+                        "😴 Venta descartada: "
+                        "RR insuficiente."
+                    )
+                }
+
+            identificador = (
+                guardar_prealerta(
+                    direccion,
+                    precio,
+                    atr,
+                    score_venta,
+                    estructura5,
+                    momentum5
+                )
+            )
+
+            mensaje = (
+                construir_prealerta(
+                    direccion,
+                    identificador,
+                    precio,
+                    sl,
+                    tp,
+                    rr,
+                    score_venta,
+                    estructura5,
+                    estructura15,
+                    momentum5
+                )
+            )
 
             print(
-                "😴 SIN SEÑAL"
+                "⚠️ NUEVA PREALERTA VENTA"
             )
 
             return {
-                "tipo": "SIN_SEÑAL",
-                "id": None,
-                "mensaje":
-                    "😴 Sin señal."
+                "tipo": "PREALERTA",
+                "id": identificador,
+                "mensaje": mensaje
             }
 
-        # -------------------------------------------------
-        # GUARDAR PREALERTA
-        # -------------------------------------------------
-
-        SETUP_ACTIVO = setup
+        # ====================================================
+        # 8. SIN SEÑAL
+        # ====================================================
 
         print(
-            "🟡 NUEVA PREALERTA:",
-            setup["id"]
+            "😴 SIN_SEÑAL"
+        )
+
+        print(
+            construir_diagnostico(
+                estructura5,
+                estructura15,
+                momentum5,
+                pullback5,
+                continuacion5
+            )
         )
 
         return {
-            "tipo": "PREALERTA",
-            "id": setup["id"],
-            "mensaje":
-                mensaje_prealerta(
-                    setup
-                )
+            "tipo": "SIN_SEÑAL",
+            "mensaje": (
+                "😴 SIN_SEÑAL"
+            )
         }
 
-    except Exception as e:
 
-        logger.exception(
-            "❌ ERROR EN STRATEGY"
-        )
-
-        return {
-            "tipo": "ERROR",
-            "id": None,
-            "mensaje":
-                (
-                    "❌ Error V4.2\n\n"
-                    f"{type(e).__name__}: "
-                    f"{e}"
-                )
-        }
+# ============================================================
+# FIN
+# ============================================================
