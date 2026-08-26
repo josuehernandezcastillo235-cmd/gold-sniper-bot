@@ -18,8 +18,8 @@ from strategy import analizar
 
 
 # =========================================================
-# XAU SNIPER AI V4.2
-# TELEGRAM + MOTOR DE ESTRATEGIA
+# XAU SNIPER AI V4.1
+# TELEGRAM + MOTOR DE ESTRUCTURA
 # =========================================================
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -29,27 +29,11 @@ INTERVALO = 100
 
 
 # =========================================================
-# ESTADO DEL BOT
+# ESTADO
 # =========================================================
 
 bot_encendido = False
-
-# Guardamos ID + tipo.
-#
-# Esto es MUY importante:
-#
-# PREALERTA ID123
-#      ↓
-# CONFIRMADA ID123
-#
-# Son el mismo setup, pero son DOS estados distintos.
-#
-# Con el sistema anterior se podía bloquear la confirmación
-# porque el ID era exactamente el mismo.
-# =========================================================
-
-ultima_senal_id = None
-ultimo_tipo_senal = None
+ultima_senal = None
 
 
 # =========================================================
@@ -104,27 +88,20 @@ async def botones(
 
     await query.answer()
 
-    # -----------------------------------------------------
-    # ENCENDER
-    # -----------------------------------------------------
-
     if query.data == "encender":
 
         bot_encendido = True
 
         await query.message.reply_text(
             (
-                "🟢 XAU SNIPER AI V4.2\n\n"
+                "🟢 XAU SNIPER AI V4.1\n\n"
                 "▶️ BOT ENCENDIDO\n\n"
                 "🔍 Analizando XAU/USD...\n\n"
                 "🧠 Estructura\n"
-                "⚡ Momentum\n"
-                "💧 Liquidez\n"
-                "🚀 Impulso + Pullback\n"
+                "🚀 Impulso\n"
+                "🔄 Pullback\n"
                 "💥 Continuación\n\n"
-                "🟡 Prealertas ACTIVAS\n"
-                "🟢 Confirmaciones ACTIVAS\n"
-                "🔴 Invalidaciones ACTIVAS\n\n"
+                "📡 Proveedor: BiQuote\n"
                 "⏱ Próximo análisis automático."
             ),
             reply_markup=teclado()
@@ -134,17 +111,13 @@ async def botones(
 
         return
 
-    # -----------------------------------------------------
-    # APAGAR
-    # -----------------------------------------------------
-
     if query.data == "apagar":
 
         bot_encendido = False
 
         await query.message.reply_text(
             (
-                "🔴 XAU SNIPER AI V4.2\n\n"
+                "🔴 XAU SNIPER AI V4.1\n\n"
                 "⏹ BOT APAGADO\n\n"
                 "El análisis automático "
                 "queda detenido.\n\n"
@@ -156,45 +129,35 @@ async def botones(
 
         print("🔴 BOT APAGADO")
 
-        return
-
 
 # =========================================================
-# INICIO DE APLICACIÓN
+# INICIO
 # =========================================================
 
 async def inicio(application):
 
     global bot_encendido
-    global ultima_senal_id
-    global ultimo_tipo_senal
 
     bot_encendido = False
 
-    ultima_senal_id = None
-    ultimo_tipo_senal = None
-
     print(
-        "🚀 XAU SNIPER AI V4.2 "
+        "🚀 XAU SNIPER AI V4.1 "
         "iniciado correctamente"
     )
 
     await application.bot.send_message(
         chat_id=CHAT_ID,
         text=(
-            "🚀 XAU SNIPER AI V4.2\n\n"
+            "🚀 XAU SNIPER AI V4.1\n\n"
             "✅ Telegram: OK\n"
-            "✅ Motor V4: OK\n"
-            "✅ Proveedor: BiQuote\n"
+            "✅ Motor V4.1: OK\n"
             "📊 Mercado: XAU/USD\n"
+            "📡 Datos: BiQuote\n"
             "⏱ Revisión: cada 100 segundos\n\n"
             "🔴 Estado: APAGADO\n\n"
             "🧠 Motor:\n"
             "Estructura → Impulso → "
             "Pullback → Continuación\n\n"
-            "🟡 Prealertas: ACTIVAS\n"
-            "🟢 Confirmaciones: ACTIVAS\n"
-            "🔴 Invalidaciones: ACTIVAS\n\n"
             "⚠️ Modo: PAPER / ESCÁNER"
         ),
         reply_markup=teclado()
@@ -204,19 +167,14 @@ async def inicio(application):
 
 
 # =========================================================
-# ANÁLISIS PROGRAMADO
+# ANÁLISIS
 # =========================================================
 
 async def ejecutar_analisis(
     context: ContextTypes.DEFAULT_TYPE
 ):
 
-    global ultima_senal_id
-    global ultimo_tipo_senal
-
-    # -----------------------------------------------------
-    # BOT APAGADO
-    # -----------------------------------------------------
+    global ultima_senal
 
     if not bot_encendido:
 
@@ -230,15 +188,9 @@ async def ejecutar_analisis(
     try:
 
         print("")
-        print(
-            "==================================="
-        )
-        print(
-            "🔍 ANALIZANDO XAU/USD..."
-        )
-        print(
-            "==================================="
-        )
+        print("===================================")
+        print("🔍 ANALIZANDO XAU/USD...")
+        print("===================================")
 
         resultado = analizar()
 
@@ -250,10 +202,7 @@ async def ejecutar_analisis(
 
             return
 
-        if not isinstance(
-            resultado,
-            dict
-        ):
+        if not isinstance(resultado, dict):
 
             print(
                 "⚠️ Resultado inesperado:"
@@ -273,32 +222,12 @@ async def ejecutar_analisis(
             "😴 Sin señal"
         )
 
-        identificador = resultado.get(
-            "id"
-        )
-
-        print(
-            f"📩 Tipo: {tipo}"
-        )
-
-        if identificador:
-            print(
-                f"🆔 ID: {identificador}"
-            )
-
+        print(f"📩 Tipo: {tipo}")
         print(mensaje)
-
-        # -------------------------------------------------
-        # SIN SEÑAL
-        # -------------------------------------------------
 
         if tipo == "SIN_SEÑAL":
 
             return
-
-        # -------------------------------------------------
-        # ERROR
-        # -------------------------------------------------
 
         if tipo == "ERROR":
 
@@ -310,35 +239,19 @@ async def ejecutar_analisis(
 
             return
 
-        # -------------------------------------------------
-        # DUPLICADOS
-        #
-        # Ya NO comparamos solamente el ID.
-        #
-        # PREALERTA ABC
-        # CONFIRMADA ABC
-        #
-        # deben poder enviarse ambas.
-        # -------------------------------------------------
+        identificador = resultado.get("id")
 
         if (
             identificador
-            and
-            identificador == ultima_senal_id
-            and
-            tipo == ultimo_tipo_senal
+            and identificador == ultima_senal
         ):
 
             print(
-                "♻️ Evento duplicado. "
+                "♻️ Señal duplicada. "
                 "No se envía."
             )
 
             return
-
-        # -------------------------------------------------
-        # ENVIAR EVENTO
-        # -------------------------------------------------
 
         await context.bot.send_message(
             chat_id=CHAT_ID,
@@ -346,11 +259,12 @@ async def ejecutar_analisis(
             reply_markup=teclado()
         )
 
-        ultima_senal_id = identificador
-        ultimo_tipo_senal = tipo
+        if identificador:
+
+            ultima_senal = identificador
 
         print(
-            "📨 Evento enviado a Telegram"
+            "📨 Señal enviada a Telegram"
         )
 
     except Exception as e:
@@ -379,18 +293,15 @@ async def start(
 
     await update.message.reply_text(
         (
-            "🥇 XAU SNIPER AI V4.2\n\n"
+            "🥇 XAU SNIPER AI V4.1\n\n"
             "🟢 BOT ENCENDIDO\n\n"
             "📊 Mercado: XAU/USD\n"
             "📡 Datos: BiQuote\n"
             "⏱ Análisis: cada 100 segundos\n\n"
             "🧠 Estructura + Movimiento\n"
-            "⚡ Momentum\n"
-            "💧 Liquidez\n"
             "🚀 Impulso + Pullback\n"
             "💥 Continuación\n\n"
-            "🟡 Buscando prealertas...\n"
-            "🟢 Esperando confirmaciones..."
+            "🔍 Buscando oportunidades..."
         ),
         reply_markup=teclado()
     )
@@ -407,30 +318,26 @@ async def status(
     context: ContextTypes.DEFAULT_TYPE
 ):
 
-    if bot_encendido:
-        estado_actual = "🟢 ENCENDIDO"
-    else:
-        estado_actual = "🔴 APAGADO"
+    estado_actual = (
+        "🟢 ENCENDIDO"
+        if bot_encendido
+        else "🔴 APAGADO"
+    )
 
     await update.message.reply_text(
         (
-            "📊 XAU SNIPER AI V4.2\n\n"
+            "📊 XAU SNIPER AI V4.1\n\n"
             f"Estado: {estado_actual}\n"
             "📈 Mercado: XAU/USD\n"
             "📡 Datos: BiQuote\n"
             "⏱ Intervalo: 100 segundos\n\n"
             "🧠 Motor:\n"
-            "Estructura + Momentum + "
-            "Liquidez\n"
-            "Impulso + Pullback + "
-            "Continuación\n\n"
-            "🟡 Prealertas: ACTIVAS\n"
-            "🟢 Confirmaciones: ACTIVAS\n"
-            "🔴 Invalidaciones: ACTIVAS\n\n"
+            "Estructura + Impulso + "
+            "Pullback + Continuación\n\n"
             "⚠️ Modo: PAPER / ESCÁNER"
         ),
         reply_markup=teclado()
-        )
+    )
 
 
 # =========================================================
@@ -438,10 +345,6 @@ async def status(
 # =========================================================
 
 def main():
-
-    # -----------------------------------------------------
-    # VARIABLES
-    # -----------------------------------------------------
 
     if not BOT_TOKEN:
 
@@ -456,7 +359,7 @@ def main():
         )
 
     print(
-        "🚀 Iniciando XAU SNIPER AI V4.2..."
+        "🚀 Iniciando XAU SNIPER AI V4.1..."
     )
 
     print(
@@ -472,12 +375,9 @@ def main():
     )
 
     print(
-        "🧠 Motor V4: estructura + movimiento"
+        "🧠 Motor V4.1: "
+        "estructura + movimiento"
     )
-
-    # -----------------------------------------------------
-    # APPLICATION
-    # -----------------------------------------------------
 
     application = (
         Application.builder()
@@ -485,10 +385,6 @@ def main():
         .post_init(inicio)
         .build()
     )
-
-    # -----------------------------------------------------
-    # COMANDOS
-    # -----------------------------------------------------
 
     application.add_handler(
         CommandHandler(
@@ -504,19 +400,11 @@ def main():
         )
     )
 
-    # -----------------------------------------------------
-    # BOTONES
-    # -----------------------------------------------------
-
     application.add_handler(
         CallbackQueryHandler(
             botones
         )
     )
-
-    # -----------------------------------------------------
-    # JOB QUEUE
-    # -----------------------------------------------------
 
     if application.job_queue is None:
 
@@ -541,10 +429,6 @@ def main():
         "▶️ Primer análisis en 5 segundos"
     )
 
-    # -----------------------------------------------------
-    # POLLING
-    # -----------------------------------------------------
-
     application.run_polling()
 
 
@@ -555,4 +439,3 @@ def main():
 if __name__ == "__main__":
 
     main()
-    
