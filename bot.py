@@ -19,7 +19,6 @@ from strategy import analizar
 
 # =========================================================
 # XAU SNIPER AI V4.1
-# TELEGRAM + MOTOR DE ESTRUCTURA
 # =========================================================
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -29,7 +28,7 @@ INTERVALO = 100
 
 
 # =========================================================
-# ESTADO
+# ESTADO DEL BOT
 # =========================================================
 
 bot_encendido = False
@@ -96,10 +95,9 @@ async def botones(
             (
                 "🟢 XAU SNIPER AI V4.1\n\n"
                 "▶️ BOT ENCENDIDO\n\n"
-                "🔍 Analizando XAU/USD...\n\n"
-                "🧠 Estructura\n"
-                "🚀 Impulso\n"
-                "🔄 Pullback\n"
+                "🔍 Analizando XAU/USD...\n"
+                "🧠 Estructura + Movimiento\n"
+                "🚀 Impulso + Pullback\n"
                 "💥 Continuación\n\n"
                 "📡 Proveedor: BiQuote\n"
                 "⏱ Próximo análisis automático."
@@ -129,9 +127,11 @@ async def botones(
 
         print("🔴 BOT APAGADO")
 
+        return
+
 
 # =========================================================
-# INICIO
+# INICIO DE APLICACIÓN
 # =========================================================
 
 async def inicio(application):
@@ -151,8 +151,8 @@ async def inicio(application):
             "🚀 XAU SNIPER AI V4.1\n\n"
             "✅ Telegram: OK\n"
             "✅ Motor V4.1: OK\n"
-            "📊 Mercado: XAU/USD\n"
             "📡 Datos: BiQuote\n"
+            "📊 Mercado: XAU/USD\n"
             "⏱ Revisión: cada 100 segundos\n\n"
             "🔴 Estado: APAGADO\n\n"
             "🧠 Motor:\n"
@@ -167,7 +167,7 @@ async def inicio(application):
 
 
 # =========================================================
-# ANÁLISIS
+# ANÁLISIS PROGRAMADO
 # =========================================================
 
 async def ejecutar_analisis(
@@ -202,7 +202,10 @@ async def ejecutar_analisis(
 
             return
 
-        if not isinstance(resultado, dict):
+        if not isinstance(
+            resultado,
+            dict
+        ):
 
             print(
                 "⚠️ Resultado inesperado:"
@@ -222,7 +225,10 @@ async def ejecutar_analisis(
             "😴 Sin señal"
         )
 
-        print(f"📩 Tipo: {tipo}")
+        print(
+            f"📩 Tipo: {tipo}"
+        )
+
         print(mensaje)
 
         if tipo == "SIN_SEÑAL":
@@ -275,7 +281,7 @@ async def ejecutar_analisis(
 
         print(
             f"❌ ERROR BOT: {e}"
-        )
+    )
 
 
 # =========================================================
@@ -318,11 +324,13 @@ async def status(
     context: ContextTypes.DEFAULT_TYPE
 ):
 
-    estado_actual = (
-        "🟢 ENCENDIDO"
-        if bot_encendido
-        else "🔴 APAGADO"
-    )
+    if bot_encendido:
+
+        estado_actual = "🟢 ENCENDIDO"
+
+    else:
+
+        estado_actual = "🔴 APAGADO"
 
     await update.message.reply_text(
         (
@@ -362,18 +370,9 @@ def main():
         "🚀 Iniciando XAU SNIPER AI V4.1..."
     )
 
-    print(
-        "📊 Mercado: XAU/USD"
-    )
-
-    print(
-        "📡 Proveedor: BiQuote"
-    )
-
-    print(
-        "⏱ Intervalo: 100 segundos"
-    )
-
+    print("📊 Mercado: XAU/USD")
+    print("📡 Proveedor: BiQuote")
+    print("⏱ Intervalo: 100 segundos")
     print(
         "🧠 Motor V4.1: "
         "estructura + movimiento"
@@ -418,15 +417,15 @@ def main():
         ejecutar_analisis,
         interval=INTERVALO,
         first=5,
-        name="analizador_xau_v4"
-    )
-
-    print(
-        "✅ Analizador programado"
+        name="analizador_xau_v41"
     )
 
     print(
         "▶️ Primer análisis en 5 segundos"
+    )
+
+    print(
+        "✅ Analizador programado"
     )
 
     application.run_polling()
