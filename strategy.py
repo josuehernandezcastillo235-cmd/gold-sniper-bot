@@ -866,3 +866,1218 @@ def analizar_estructura(df):
 # ============================================================
 # FIN PARTE 3/9
 # ============================================================
+
+
+# ============================================================
+# XAU SNIPER AI V4.2
+# PARTE 4/9
+# RÉGIMEN + DIRECCIÓN + IMPULSO
+# ============================================================
+
+
+# ============================================================
+# RÉGIMEN DEL MERCADO
+# ============================================================
+
+def determinar_regimen(
+    estructura_5m,
+    estructura_15m,
+    df5,
+    df15
+):
+
+    estado5 = estructura_5m["estado"]
+    estado15 = estructura_15m["estado"]
+
+    adx5 = numero(
+        df5.iloc[-1]["adx"],
+        0
+    )
+
+    adx15 = numero(
+        df15.iloc[-1]["adx"],
+        0
+    )
+
+    # --------------------------------------------------------
+    # Tendencia clara en ambas temporalidades.
+    # --------------------------------------------------------
+
+    if (
+        estado5 == "ALCISTA"
+        and estado15 == "ALCISTA"
+        and adx5 >= ADX_MINIMO
+    ):
+
+        return "ALCISTA"
+
+    if (
+        estado5 == "BAJISTA"
+        and estado15 == "BAJISTA"
+        and adx5 >= ADX_MINIMO
+    ):
+
+        return "BAJISTA"
+
+    # --------------------------------------------------------
+    # Si una temporalidad es MIXTA, no inventamos tendencia.
+    # --------------------------------------------------------
+
+    if (
+        estado5 == "ALCISTA"
+        and estado15 == "ALCISTA"
+    ):
+
+        return "ALCISTA"
+
+    if (
+        estado5 == "BAJISTA"
+        and estado15 == "BAJISTA"
+    ):
+
+        return "BAJISTA"
+
+    # --------------------------------------------------------
+    # Lateral cuando no hay estructura suficientemente limpia.
+    # --------------------------------------------------------
+
+    if (
+        adx5 < ADX_MINIMO
+        and adx15 < ADX_MINIMO
+    ):
+
+        return "LATERAL"
+
+    return "LATERAL"
+
+
+# ============================================================
+# IMPULSO
+# ============================================================
+
+def detectar_impulso(df):
+
+    if len(df) < 8:
+
+        return {
+            "compra": False,
+            "venta": False,
+            "fuerza_compra": 0,
+            "fuerza_venta": 0
+        }
+
+    ultimas = df.iloc[-5:].copy()
+
+    atr = numero(
+        df.iloc[-1]["atr"],
+        0
+    )
+
+    if atr <= 0:
+
+        return {
+            "compra": False,
+            "venta": False,
+            "fuerza_compra": 0,
+            "fuerza_venta": 0
+        }
+
+    # --------------------------------------------------------
+    # Medimos movimiento neto, no simplemente si hubo una
+    # vela verde y una roja.
+    # --------------------------------------------------------
+
+    cierre_inicio = float(
+        ultimas.iloc[0]["open"]
+    )
+
+    cierre_final = float(
+        ultimas.iloc[-1]["close"]
+    )
+
+    movimiento_neto = (
+        cierre_final -
+        cierre_inicio
+    )
+
+    # Movimiento máximo y mínimo de las últimas velas.
+    maximo = float(
+        ultimas["high"].max()
+    )
+
+    minimo = float(
+        ultimas["low"].min()
+    )
+
+    rango_total = (
+        maximo - minimo
+    )
+
+    # --------------------------------------------------------
+    # Presión acumulada por cuerpos.
+    # --------------------------------------------------------
+
+    cuerpos_alcistas = 0.0
+    cuerpos_bajistas = 0.0
+
+    for _, fila in ultimas.iterrows():
+
+        cuerpo = (
+            float(fila["close"]) -
+            float(fila["open"])
+        )
+
+        if cuerpo > 0:
+            cuerpos_alcistas += cuerpo
+
+        elif cuerpo < 0:
+            cuerpos_bajistas += abs(cuerpo)
+
+    # --------------------------------------------------------
+    # Velas con cuerpo relativamente fuerte.
+    # --------------------------------------------------------
+
+    velas_fuertes_compra = 0
+    velas_fuertes_venta = 0
+
+    for _, fila in ultimas.iterrows():
+
+        rango = numero(
+            fila["range"],
+            0
+        )
+
+        cuerpo = numero(
+            fila["body"],
+            0
+        )
+
+        if rango <= 0:
+            continue
+
+        ratio = cuerpo / rango
+
+        if ratio >= 0.55:
+
+            if fila["close"] > fila["open"]:
+                velas_fuertes_compra += 1
+
+            elif fila["close"] < fila["open"]:
+                velas_fuertes_venta += 1
+
+    # --------------------------------------------------------
+    # Fuerza normalizada.
+    # --------------------------------------------------------
+
+    fuerza_compra = 0
+    fuerza_venta = 0
+
+    if movimiento_neto > atr * 0.25:
+        fuerza_compra += 35
+
+    if movimiento_neto < -atr * 0.25:
+        fuerza_venta += 35
+
+    if cuerpos_alcistas > cuerpos_bajistas * 1.20:
+        fuerza_compra += 30
+
+    elif cuerpos_bajistas > cuerpos_alcistas * 1.20:
+        fuerza_venta += 30
+
+    if velas_fuertes_compra >= 2:
+        fuerza_compra += 20
+
+    if velas_fuertes_venta >= 2:
+        fuerza_venta += 20
+
+    # --------------------------------------------------------
+    # Rango total demasiado pequeño = no hay impulso real.
+    # --------------------------------------------------------
+
+    if rango_total < atr * 0.70:
+
+        fuerza_compra = min(
+            fuerza_compra,
+            30
+        )
+
+        fuerza_venta = min(
+            fuerza_venta,
+            30
+        )
+
+    # --------------------------------------------------------
+    # MUY IMPORTANTE:
+    # no marcamos ambos impulsos True simplemente porque
+    # existen velas de ambos colores.
+    #
+    # Se exige dominio.
+    # --------------------------------------------------------
+
+    diferencia = (
+        fuerza_compra -
+        fuerza_venta
+    )
+
+    compra = (
+        fuerza_compra >= 60
+        and diferencia >= 15
+    )
+
+    venta = (
+        fuerza_venta >= 60
+        and diferencia <= -15
+    )
+
+    return {
+        "compra": compra,
+        "venta": venta,
+        "fuerza_compra": fuerza_compra,
+        "fuerza_venta": fuerza_venta
+    }
+
+
+# ============================================================
+# DIRECCIÓN
+# ============================================================
+
+def determinar_direccion(
+    regimen,
+    estructura5,
+    estructura15,
+    impulso
+):
+
+    # --------------------------------------------------------
+    # Primero estructura.
+    # --------------------------------------------------------
+
+    compra = 0
+    venta = 0
+
+    if regimen == "ALCISTA":
+        compra += 2
+
+    elif regimen == "BAJISTA":
+        venta += 2
+
+    if estructura5["estado"] == "ALCISTA":
+        compra += 2
+
+    elif estructura5["estado"] == "BAJISTA":
+        venta += 2
+
+    if estructura15["estado"] == "ALCISTA":
+        compra += 2
+
+    elif estructura15["estado"] == "BAJISTA":
+        venta += 2
+
+    # --------------------------------------------------------
+    # Impulso dominante.
+    # --------------------------------------------------------
+
+    if impulso["compra"]:
+        compra += 2
+
+    if impulso["venta"]:
+        venta += 2
+
+    # --------------------------------------------------------
+    # Si las puntuaciones son iguales, NEUTRAL.
+    # --------------------------------------------------------
+
+    if compra > venta:
+
+        return "COMPRA"
+
+    if venta > compra:
+
+        return "VENTA"
+
+    return "NEUTRAL"
+
+
+# ============================================================
+# FIN PARTE 4/9
+# ============================================================
+
+
+# ============================================================
+# XAU SNIPER AI V4.2
+# PARTE 5/9
+# PULLBACK + CONTINUACIÓN + LIQUIDEZ
+# ============================================================
+
+
+# ============================================================
+# PULLBACK REAL
+# ============================================================
+
+def detectar_pullback(
+    df,
+    direccion
+):
+
+    if len(df) < 12:
+
+        return False
+
+    atr = numero(
+        df.iloc[-1]["atr"],
+        0
+    )
+
+    if atr <= 0:
+        return False
+
+    # Últimas 8 velas.
+    ventana = df.iloc[-8:].copy()
+
+    # Movimiento previo.
+    mitad = len(ventana) // 2
+
+    tramo1 = ventana.iloc[
+        :mitad
+    ]
+
+    tramo2 = ventana.iloc[
+        mitad:
+    ]
+
+    movimiento1 = (
+        tramo1.iloc[-1]["close"] -
+        tramo1.iloc[0]["open"]
+    )
+
+    movimiento2 = (
+        tramo2.iloc[-1]["close"] -
+        tramo2.iloc[0]["open"]
+    )
+
+    # --------------------------------------------------------
+    # COMPRA:
+    # primero hubo desplazamiento alcista y después
+    # retroceso controlado.
+    # --------------------------------------------------------
+
+    if direccion == "COMPRA":
+
+        impulso_previo = (
+            movimiento1 > atr * 0.35
+        )
+
+        retroceso = (
+            movimiento2 < -atr * 0.12
+        )
+
+        retroceso_controlado = (
+            abs(movimiento2)
+            < abs(movimiento1) * 0.70
+        )
+
+        cierre_no_colapsa = (
+            df.iloc[-1]["close"]
+            >
+            ventana["low"].min()
+            + atr * 0.15
+        )
+
+        return bool(
+            impulso_previo
+            and retroceso
+            and retroceso_controlado
+            and cierre_no_colapsa
+        )
+
+    # --------------------------------------------------------
+    # VENTA
+    # --------------------------------------------------------
+
+    if direccion == "VENTA":
+
+        impulso_previo = (
+            movimiento1 < -atr * 0.35
+        )
+
+        retroceso = (
+            movimiento2 > atr * 0.12
+        )
+
+        retroceso_controlado = (
+            abs(movimiento2)
+            < abs(movimiento1) * 0.70
+        )
+
+        cierre_no_colapsa = (
+            df.iloc[-1]["close"]
+            <
+            ventana["high"].max()
+            - atr * 0.15
+        )
+
+        return bool(
+            impulso_previo
+            and retroceso
+            and retroceso_controlado
+            and cierre_no_colapsa
+        )
+
+    return False
+
+
+# ============================================================
+# CONTINUACIÓN
+# ============================================================
+
+def detectar_continuacion(
+    df,
+    direccion
+):
+
+    if len(df) < 8:
+        return False
+
+    atr = numero(
+        df.iloc[-1]["atr"],
+        0
+    )
+
+    if atr <= 0:
+        return False
+
+    ultimas = df.iloc[-3:]
+
+    cuerpo_total = 0.0
+
+    for _, fila in ultimas.iterrows():
+
+        cuerpo = (
+            float(fila["close"]) -
+            float(fila["open"])
+        )
+
+        if direccion == "COMPRA" and cuerpo > 0:
+            cuerpo_total += cuerpo
+
+        elif direccion == "VENTA" and cuerpo < 0:
+            cuerpo_total += abs(cuerpo)
+
+    # --------------------------------------------------------
+    # COMPRA
+    # --------------------------------------------------------
+
+    if direccion == "COMPRA":
+
+        cierre = float(
+            df.iloc[-1]["close"]
+        )
+
+        max_prev = float(
+            df.iloc[-4:-1]["high"].max()
+        )
+
+        ruptura = (
+            cierre >
+            max_prev
+        )
+
+        desplazamiento = (
+            cuerpo_total >= atr * 0.35
+        )
+
+        vela_final_alcista = (
+            df.iloc[-1]["close"]
+            >
+            df.iloc[-1]["open"]
+        )
+
+        return bool(
+            ruptura
+            and desplazamiento
+            and vela_final_alcista
+        )
+
+    # --------------------------------------------------------
+    # VENTA
+    # --------------------------------------------------------
+
+    if direccion == "VENTA":
+
+        cierre = float(
+            df.iloc[-1]["close"]
+        )
+
+        min_prev = float(
+            df.iloc[-4:-1]["low"].min()
+        )
+
+        ruptura = (
+            cierre <
+            min_prev
+        )
+
+        desplazamiento = (
+            cuerpo_total >= atr * 0.35
+        )
+
+        vela_final_bajista = (
+            df.iloc[-1]["close"]
+            <
+            df.iloc[-1]["open"]
+        )
+
+        return bool(
+            ruptura
+            and desplazamiento
+            and vela_final_bajista
+        )
+
+    return False
+
+
+# ============================================================
+# LIQUIDEZ / MÁXIMOS Y MÍNIMOS
+# ============================================================
+
+def analizar_liquidez(df):
+
+    if len(df) < 20:
+
+        return {
+            "maximo": None,
+            "minimo": None,
+            "barrido_compra": False,
+            "barrido_venta": False
+        }
+
+    # No usamos la última vela para construir el nivel.
+    # Así evitamos que el propio precio actual "cree" el nivel.
+    referencia = df.iloc[-11:-1]
+
+    maximo = float(
+        referencia["high"].max()
+    )
+
+    minimo = float(
+        referencia["low"].min()
+    )
+
+    ultima = df.iloc[-1]
+
+    # --------------------------------------------------------
+    # Barrido de liquidez bajista:
+    # rompe mínimo y recupera por encima.
+    # --------------------------------------------------------
+
+    barrido_compra = bool(
+        ultima["low"] < minimo
+        and ultima["close"] > minimo
+    )
+
+    # --------------------------------------------------------
+    # Barrido de liquidez alcista:
+    # rompe máximo y recupera por debajo.
+    # --------------------------------------------------------
+
+    barrido_venta = bool(
+        ultima["high"] > maximo
+        and ultima["close"] < maximo
+    )
+
+    return {
+        "maximo": maximo,
+        "minimo": minimo,
+        "barrido_compra": barrido_compra,
+        "barrido_venta": barrido_venta
+    }
+
+
+# ============================================================
+# FIN PARTE 5/9
+# ============================================================
+
+
+# ============================================================
+# XAU SNIPER AI V4.2
+# PARTE 6/9
+# MOMENTUM + SCORE
+# ============================================================
+
+
+# ============================================================
+# MOMENTUM
+# ============================================================
+
+def analizar_momentum(df):
+
+    fila = df.iloc[-1]
+
+    rsi = numero(
+        fila["rsi"],
+        50
+    )
+
+    adx = numero(
+        fila["adx"],
+        0
+    )
+
+    di_plus = numero(
+        fila["di_plus"],
+        0
+    )
+
+    di_minus = numero(
+        fila["di_minus"],
+        0
+    )
+
+    # --------------------------------------------------------
+    # COMPRA
+    # --------------------------------------------------------
+
+    compra = (
+        rsi >= RSI_COMPRA
+        and di_plus > di_minus
+    )
+
+    # --------------------------------------------------------
+    # VENTA
+    # --------------------------------------------------------
+
+    venta = (
+        rsi <= RSI_VENTA
+        and di_minus > di_plus
+    )
+
+    return {
+        "rsi": rsi,
+        "adx": adx,
+        "di_plus": di_plus,
+        "di_minus": di_minus,
+        "compra": bool(compra),
+        "venta": bool(venta)
+    }
+
+
+# ============================================================
+# SCORE
+# ============================================================
+
+def calcular_score(
+    direccion,
+    regimen,
+    estructura5,
+    estructura15,
+    impulso,
+    pullback,
+    continuacion,
+    liquidez,
+    momentum
+):
+
+    score = 0
+    razones = []
+
+    # ========================================================
+    # COMPRA
+    # ========================================================
+
+    if direccion == "COMPRA":
+
+        # Régimen
+        if regimen == "ALCISTA":
+            score += 15
+            razones.append(
+                "régimen alcista"
+            )
+
+        # Estructura 5M
+        if estructura5["estado"] == "ALCISTA":
+            score += 15
+            razones.append(
+                "estructura 5M alcista"
+            )
+
+        # Estructura 15M
+        if estructura15["estado"] == "ALCISTA":
+            score += 15
+            razones.append(
+                "estructura 15M alcista"
+            )
+
+        # HH + HL
+        if (
+            estructura5["hh"]
+            and estructura5["hl"]
+        ):
+
+            score += 10
+            razones.append(
+                "HH + HL"
+            )
+
+        # BOS
+        if estructura5["bos_compra"]:
+            score += 8
+            razones.append(
+                "BOS compra"
+            )
+
+        # Impulso
+        if impulso["compra"]:
+            score += 10
+            razones.append(
+                "impulso comprador"
+            )
+
+        # Pullback
+        if pullback:
+            score += 8
+            razones.append(
+                "pullback real"
+            )
+
+        # Continuación
+        if continuacion:
+            score += 10
+            razones.append(
+                "continuación"
+            )
+
+        # Momentum
+        if momentum["rsi"] >= RSI_CONFIRMACION_COMPRA:
+            score += 5
+            razones.append(
+                "RSI confirma"
+            )
+
+        if momentum["adx"] >= ADX_CONFIRMACION:
+            score += 4
+            razones.append(
+                "ADX suficiente"
+            )
+
+        if (
+            momentum["di_plus"]
+            >
+            momentum["di_minus"]
+        ):
+
+            score += 5
+            razones.append(
+                "DI+ dominante"
+            )
+
+        # Liquidez
+        if liquidez["barrido_compra"]:
+            score += 5
+            razones.append(
+                "barrido de liquidez"
+            )
+
+    # ========================================================
+    # VENTA
+    # ========================================================
+
+    elif direccion == "VENTA":
+
+        if regimen == "BAJISTA":
+            score += 15
+            razones.append(
+                "régimen bajista"
+            )
+
+        if estructura5["estado"] == "BAJISTA":
+            score += 15
+            razones.append(
+                "estructura 5M bajista"
+            )
+
+        if estructura15["estado"] == "BAJISTA":
+            score += 15
+            razones.append(
+                "estructura 15M bajista"
+            )
+
+        if (
+            estructura5["lh"]
+            and estructura5["ll"]
+        ):
+
+            score += 10
+            razones.append(
+                "LH + LL"
+            )
+
+        if estructura5["bos_venta"]:
+            score += 8
+            razones.append(
+                "BOS venta"
+            )
+
+        if impulso["venta"]:
+            score += 10
+            razones.append(
+                "impulso vendedor"
+            )
+
+        if pullback:
+            score += 8
+            razones.append(
+                "pullback real"
+            )
+
+        if continuacion:
+            score += 10
+            razones.append(
+                "continuación"
+            )
+
+        if momentum["rsi"] <= RSI_CONFIRMACION_VENTA:
+            score += 5
+            razones.append(
+                "RSI confirma"
+            )
+
+        if momentum["adx"] >= ADX_CONFIRMACION:
+            score += 4
+            razones.append(
+                "ADX suficiente"
+            )
+
+        if (
+            momentum["di_minus"]
+            >
+            momentum["di_plus"]
+        ):
+
+            score += 5
+            razones.append(
+                "DI- dominante"
+            )
+
+        if liquidez["barrido_venta"]:
+            score += 5
+            razones.append(
+                "barrido de liquidez"
+            )
+
+    score = min(
+        int(score),
+        100
+    )
+
+    return score, razones
+
+
+# ============================================================
+# FIN PARTE 6/9
+# ============================================================
+
+
+# ============================================================
+# XAU SNIPER AI V4.2
+# PARTE 7/9
+# RIESGO + SL/TP + IDs + ESTADOS
+# ============================================================
+
+
+# ============================================================
+# SL / TP DINÁMICOS
+# ============================================================
+
+def calcular_riesgo(
+    precio,
+    atr,
+    direccion,
+    estructura,
+    liquidez
+):
+
+    atr = numero(
+        atr,
+        0
+    )
+
+    precio = numero(
+        precio,
+        0
+    )
+
+    if atr <= 0 or precio <= 0:
+
+        return None
+
+    distancia_sl = atr * ATR_SL
+
+    distancia_tp = atr * ATR_TP
+
+    # --------------------------------------------------------
+    # Ajuste usando estructura.
+    # No colocamos el SL exactamente sobre un swing.
+    # --------------------------------------------------------
+
+    if direccion == "COMPRA":
+
+        sl = precio - distancia_sl
+        tp = precio + distancia_tp
+
+        ultimo_low = estructura.get(
+            "ultimo_low"
+        )
+
+        if ultimo_low:
+
+            nivel = float(
+                ultimo_low["price"]
+            )
+
+            sl_estructural = (
+                nivel - atr * 0.15
+            )
+
+            # Elegimos el nivel que dé espacio suficiente
+            # sin exagerar la distancia.
+            if (
+                sl_estructural < precio
+                and
+                sl_estructural > precio - atr * 1.80
+            ):
+
+                sl = sl_estructural
+
+        # Liquidez reciente
+        minimo = liquidez.get(
+            "minimo"
+        )
+
+        if minimo:
+
+            if (
+                minimo < precio
+                and
+                minimo > sl
+            ):
+
+                sl = (
+                    minimo -
+                    atr * 0.10
+                )
+
+    else:
+
+        sl = precio + distancia_sl
+        tp = precio - distancia_tp
+
+        ultimo_high = estructura.get(
+            "ultimo_high"
+        )
+
+        if ultimo_high:
+
+            nivel = float(
+                ultimo_high["price"]
+            )
+
+            sl_estructural = (
+                nivel + atr * 0.15
+            )
+
+            if (
+                sl_estructural > precio
+                and
+                sl_estructural < precio + atr * 1.80
+            ):
+
+                sl = sl_estructural
+
+        maximo = liquidez.get(
+            "maximo"
+        )
+
+        if maximo:
+
+            if (
+                maximo > precio
+                and
+                maximo < sl
+            ):
+
+                sl = (
+                    maximo +
+                    atr * 0.10
+                )
+
+    # --------------------------------------------------------
+    # Recalcular TP para mantener como mínimo el RR deseado.
+    # --------------------------------------------------------
+
+    riesgo = abs(
+        precio - sl
+    )
+
+    if riesgo <= 0:
+
+        return None
+
+    beneficio_minimo = (
+        riesgo * RR_MINIMO
+    )
+
+    if direccion == "COMPRA":
+
+        tp_minimo = (
+            precio +
+            beneficio_minimo
+        )
+
+        if tp < tp_minimo:
+            tp = tp_minimo
+
+    else:
+
+        tp_minimo = (
+            precio -
+            beneficio_minimo
+        )
+
+        if tp > tp_minimo:
+            tp = tp_minimo
+
+    beneficio = abs(
+        tp - precio
+    )
+
+    rr = (
+        beneficio / riesgo
+        if riesgo > 0
+        else 0
+    )
+
+    if rr < RR_MINIMO:
+
+        return None
+
+    return {
+        "sl": redondear_precio(sl),
+        "tp": redondear_precio(tp),
+        "rr": rr,
+        "riesgo": riesgo
+    }
+
+
+# ============================================================
+# ID DE SEÑAL
+# ============================================================
+
+def generar_id(
+    direccion,
+    precio
+):
+
+    ahora = int(
+        time.time()
+    )
+
+    corto = uuid.uuid4().hex[:4]
+
+    return (
+        f"{direccion}-"
+        f"{ahora}-"
+        f"{redondear_precio(precio):.2f}-"
+        f"{corto}"
+    )
+
+
+# ============================================================
+# COOLDOWN
+# ============================================================
+
+def cooldown_activo(
+    direccion
+):
+
+    global ultima_confirmacion_ts
+    global ultima_direccion
+
+    if (
+        ultima_confirmacion_ts is None
+        or ultima_direccion is None
+    ):
+
+        return False
+
+    if direccion != ultima_direccion:
+
+        return False
+
+    transcurrido = (
+        time.time() -
+        ultima_confirmacion_ts
+    ) / 60
+
+    return (
+        transcurrido
+        <
+        MINUTOS_COOLDOWN_CONFIRMADA
+    )
+
+
+def registrar_confirmacion(
+    direccion
+):
+
+    global ultima_confirmacion_ts
+    global ultima_direccion
+
+    ultima_confirmacion_ts = time.time()
+    ultima_direccion = direccion
+
+
+# ============================================================
+# ERROR CONTROLADO
+# ============================================================
+
+def mensaje_error(mensaje):
+
+    global ultimo_error_ts
+
+    ahora = time.time()
+
+    # El strategy devuelve ERROR, pero evita que una falla
+    # temporal mande spam continuamente.
+    if (
+        ahora - ultimo_error_ts
+        < 300
+    ):
+
+        return {
+            "tipo": "SIN_SEÑAL",
+            "mensaje": (
+                "😴 SIN_SEÑAL\n\n"
+                "⚠️ Error temporal de datos "
+                "ya notificado."
+            ),
+            "id": None
+        }
+
+    ultimo_error_ts = ahora
+
+    return {
+        "tipo": "ERROR",
+        "mensaje": (
+            "❌ XAU SNIPER AI V4.2\n\n"
+            "⚠️ Error de datos / motor\n\n"
+            f"{mensaje}\n\n"
+            "📡 Proveedor: Twelve Data\n"
+            "🛑 El bot continúa ejecutándose."
+        ),
+        "id": None
+    }
+
+
+# ============================================================
+# FIN PARTE 7/9
+# ============================================================
