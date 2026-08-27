@@ -10,7 +10,7 @@ from ta.trend import ADXIndicator
 
 
 # ============================================================
-# XAU SNIPER AI V4.1
+# XAU SNIPER AI V4.2
 # MOTOR DE ESTRUCTURA + MOMENTUM + LIQUIDEZ
 #
 # PROVEEDOR:
@@ -19,12 +19,18 @@ from ta.trend import ADXIndicator
 # MODO:
 # PAPER / ESCÁNER
 #
-# CAMBIOS V4.1 CORREGIDA:
-# 1. Prealertas ya no desaparecen silenciosamente.
-# 2. Confirmación con diagnóstico de condiciones.
-# 3. Cooldown separado de vida de prealerta.
-# 4. Setup permite TRANSICION, pero confirmación sigue siendo
-#    estricta.
+# FLUJO:
+# ESTRUCTURA
+#     ↓
+# IMPULSO
+#     ↓
+# PULLBACK
+#     ↓
+# PREALERTA
+#     ↓
+# CONTINUACIÓN
+#     ↓
+# CONFIRMACIÓN
 # ============================================================
 
 
@@ -43,24 +49,27 @@ ADX_MINIMO = 15
 RSI_COMPRA = 52
 RSI_VENTA = 48
 
-RSI_CONFIRMACION_COMPRA = 55
-RSI_CONFIRMACION_VENTA = 45
+RSI_CONFIRMACION_COMPRA = 54
+RSI_CONFIRMACION_VENTA = 46
 
 ATR_SL = 1.30
 ATR_TP = 2.20
 
 RR_MINIMO = 1.50
 
+# Tiempo máximo de vida de una prealerta
+MINUTOS_PREALERTA = 15
 
-# ============================================================
-# TIEMPOS
-# ============================================================
+# Tiempo mínimo antes de permitir otra prealerta
+MINUTOS_REPETICION = 15
 
-# Tiempo mínimo entre nuevas prealertas.
-COOLDOWN_MINUTOS = 15
+# Para detectar retrocesos
+PULLBACK_MIN_ATR = 0.20
+PULLBACK_MAX_ATR = 1.80
 
-# Tiempo máximo que una prealerta puede permanecer activa.
-PREALERTA_MAX_MINUTOS = 30
+# Impulso mínimo
+IMPULSO_CUERPO_ATR = 0.40
+IMPULSO_RANGO_ATR = 0.70
 
 TIMEOUT = 12
 
@@ -77,6 +86,9 @@ ultima_alerta_timestamp = 0
 ultima_confirmacion_id = None
 ultima_confirmacion_timestamp = 0
 
+ultima_vela_5m = None
+ultima_vela_15m = None
+
 
 # ============================================================
 # SESIÓN HTTP
@@ -85,7 +97,7 @@ ultima_confirmacion_timestamp = 0
 SESSION = requests.Session()
 
 SESSION.headers.update({
-    "User-Agent": "XAU-Sniper-AI/4.1"
+    "User-Agent": "XAU-Sniper-AI/4.2"
 })
 
 
@@ -94,7 +106,6 @@ SESSION.headers.update({
 # ============================================================
 
 def ahora_ms():
-
     return int(time.time() * 1000)
 
 
@@ -241,6 +252,7 @@ def obtener_ohlc(
         subset=["openTime"]
     )
 
+    # No usar vela actualmente abierta
     if "isOpen" in df.columns:
 
         df = df[
@@ -386,13 +398,13 @@ def ultimos_pivots(df):
         df["pivot_high"]
     ][
         ["openTime", "high"]
-    ].tail(6)
+    ].tail(8)
 
     pl = df[
         df["pivot_low"]
     ][
         ["openTime", "low"]
-    ].tail(6)
+    ].tail(8)
 
     highs = list(
         ph["high"].astype(float)
@@ -548,15 +560,15 @@ def evaluar_momentum(df):
     impulso_alcista = (
         vela_alcista
         and atr > 0
-        and cuerpo >= atr * 0.45
-        and rango >= atr * 0.70
+        and cuerpo >= atr * IMPULSO_CUERPO_ATR
+        and rango >= atr * IMPULSO_RANGO_ATR
     )
 
     impulso_bajista = (
         vela_bajista
         and atr > 0
-        and cuerpo >= atr * 0.45
-        and rango >= atr * 0.70
+        and cuerpo >= atr * IMPULSO_CUERPO_ATR
+        and rango >= atr * IMPULSO_RANGO_ATR
     )
 
     momentum_alcista = (
@@ -588,7 +600,7 @@ def evaluar_momentum(df):
 
 
 # ============================================================
-# PULLBACK
+# PULLBACK REAL
 # ============================================================
 
 def detectar_pullback(
@@ -604,8 +616,55 @@ def detectar_pullback(
 
         return {
             "pullback_compra": False,
-            "pullback_venta": False
+            "pullback_venta": False,
+            "impulso_previo_compra": False,
+            "impulso_previo_venta": False,
+            "retroceso_compra": False,
+            "retroceso_venta": False
         }
+
+    # --------------------------------------------------------
+    # Miramos las últimas velas cerradas.
+    # Buscamos evidencia de impulso reciente.
+    # --------------------------------------------------------
+
+    recientes = df.tail(6).copy()
+
+    cuerpos = (
+        recientes["close"]
+        - recientes["open"]
+    ).abs()
+
+    rangos = (
+        recientes["high"]
+        - recientes["low"]
+    )
+
+    alcistas = (
+        recientes["close"]
+        > recientes["open"]
+    )
+
+    bajistas = (
+        recientes["close"]
+        < recientes["open"]
+    )
+
+    impulso_previo_compra = bool(
+        (
+            alcistas
+            & (cuerpos >= recientes["atr"] * 0.40)
+            & (rangos >= recientes["atr"] * 0.70)
+        ).any()
+    )
+
+    impulso_previo_venta = bool(
+        (
+            bajistas
+            & (cuerpos >= recientes["atr"] * 0.40)
+            & (rangos >= recientes["atr"] * 0.70)
+        ).any()
+    )
 
     highs, lows = ultimos_pivots(df)
 
@@ -613,7 +672,13 @@ def detectar_pullback(
 
         return {
             "pullback_compra": False,
-            "pullback_venta": False
+            "pullback_venta": False,
+            "impulso_previo_compra":
+                impulso_previo_compra,
+            "impulso_previo_venta":
+                impulso_previo_venta,
+            "retroceso_compra": False,
+            "retroceso_venta": False
         }
 
     swing_high = highs[-1]
@@ -628,30 +693,47 @@ def detectar_pullback(
     )
 
     # --------------------------------------------------------
-    # Para PREALERTA permitimos TRANSICION.
-    # La confirmación continuará siendo más estricta.
+    # COMPRA
     # --------------------------------------------------------
 
-    pullback_compra = (
-        estructura["regimen"]
-        in ["ALCISTA", "TRANSICION"]
-        and distancia_low <= atr * 2.0
+    retroceso_compra = (
+        estructura["regimen"] == "ALCISTA"
+        and impulso_previo_compra
+        and distancia_low >= atr * PULLBACK_MIN_ATR
+        and distancia_low <= atr * PULLBACK_MAX_ATR
         and precio >= swing_low
     )
 
-    pullback_venta = (
-        estructura["regimen"]
-        in ["BAJISTA", "TRANSICION"]
-        and distancia_high <= atr * 2.0
+    # --------------------------------------------------------
+    # VENTA
+    # --------------------------------------------------------
+
+    retroceso_venta = (
+        estructura["regimen"] == "BAJISTA"
+        and impulso_previo_venta
+        and distancia_high >= atr * PULLBACK_MIN_ATR
+        and distancia_high <= atr * PULLBACK_MAX_ATR
         and precio <= swing_high
     )
 
     return {
         "pullback_compra":
-            pullback_compra,
+            retroceso_compra,
 
         "pullback_venta":
-            pullback_venta
+            retroceso_venta,
+
+        "impulso_previo_compra":
+            impulso_previo_compra,
+
+        "impulso_previo_venta":
+            impulso_previo_venta,
+
+        "retroceso_compra":
+            retroceso_compra,
+
+        "retroceso_venta":
+            retroceso_venta
     }
 
 
@@ -693,16 +775,18 @@ def detectar_continuacion(
 
     atr = momentum["atr"]
 
+    rango = high - low
+
     continuacion_compra = (
         close > prev_high
         and close > open_
-        and (high - low) >= atr * 0.45
+        and rango >= atr * 0.45
     )
 
     continuacion_venta = (
         close < prev_low
         and close < open_
-        and (high - low) >= atr * 0.45
+        and rango >= atr * 0.45
     )
 
     return {
@@ -733,13 +817,6 @@ def calcular_score_compra(
         score += 25
         razones.append(
             "estructura alcista"
-        )
-
-    elif estructura["regimen"] == "TRANSICION":
-
-        score += 12
-        razones.append(
-            "estructura en transición"
         )
 
     if estructura["bos_alcista"]:
@@ -813,13 +890,6 @@ def calcular_score_venta(
         score += 25
         razones.append(
             "estructura bajista"
-        )
-
-    elif estructura["regimen"] == "TRANSICION":
-
-        score += 12
-        razones.append(
-            "estructura en transición"
         )
 
     if estructura["bos_bajista"]:
@@ -934,10 +1004,6 @@ def calcular_niveles(
     return sl, tp, rr
 
 
-# ============================================================
-# RR
-# ============================================================
-
 def rr_valido(rr):
 
     return (
@@ -984,7 +1050,7 @@ def cooldown_activo():
 
     return (
         transcurrido
-        < COOLDOWN_MINUTOS * 60
+        < MINUTOS_REPETICION * 60
     )
 
 
@@ -1023,6 +1089,7 @@ def guardar_prealerta(
     }
 
     ultima_alerta_id = identificador
+
     ultima_alerta_timestamp = time.time()
 
     return identificador
@@ -1045,7 +1112,7 @@ def prealerta_vigente():
         - estado_prealerta["timestamp"]
     )
 
-    if edad > PREALERTA_MAX_MINUTOS * 60:
+    if edad > MINUTOS_PREALERTA * 60:
 
         return False
 
@@ -1053,25 +1120,19 @@ def prealerta_vigente():
 
 
 # ============================================================
-# PREALERTA VENCIDA
+# EXPIRACIÓN
 # ============================================================
 
-def revisar_expiracion_prealerta():
+def expirar_prealerta():
 
     global estado_prealerta
 
-    if estado_prealerta is None:
+    if not estado_prealerta:
 
-        return None
-
-    edad = (
-        time.time()
-        - estado_prealerta["timestamp"]
-    )
-
-    if edad <= PREALERTA_MAX_MINUTOS * 60:
-
-        return None
+        return {
+            "tipo": "SIN_SEÑAL",
+            "mensaje": "😴 SIN_SEÑAL"
+        }
 
     anterior = estado_prealerta
 
@@ -1081,8 +1142,8 @@ def revisar_expiracion_prealerta():
         "tipo": "DESCARTADA",
         "id": anterior["id"],
         "mensaje": (
-            "🟠 XAU SNIPER AI V4.1\n\n"
-            "❌ PREALERTA DESCARTADA\n\n"
+            "🟠 XAU SNIPER AI V4.2\n\n"
+            "⏰ PREALERTA EXPIRADA\n\n"
             f"📌 Dirección: "
             f"{anterior['direccion']}\n"
             f"🆔 ID: "
@@ -1090,18 +1151,16 @@ def revisar_expiracion_prealerta():
             f"📊 Score inicial: "
             f"{anterior['score']}/100\n\n"
             "🧠 Motivo:\n"
-            f"⏱️ No hubo confirmación "
-            f"dentro de "
-            f"{PREALERTA_MAX_MINUTOS} minutos.\n\n"
-            "🔍 La configuración no "
-            "alcanzó las condiciones "
-            "de confirmación."
+            "No apareció la continuación "
+            "necesaria dentro del tiempo "
+            "establecido.\n\n"
+            "❌ Setup cerrado."
         )
     }
 
 
 # ============================================================
-# DESCARTAR PREALERTA
+# DESCARTAR
 # ============================================================
 
 def descartar_prealerta(
@@ -1125,7 +1184,7 @@ def descartar_prealerta(
         "tipo": "DESCARTADA",
         "id": anterior["id"],
         "mensaje": (
-            "🟠 XAU SNIPER AI V4.1\n\n"
+            "🟠 XAU SNIPER AI V4.2\n\n"
             "❌ PREALERTA DESCARTADA\n\n"
             f"📌 Dirección: "
             f"{anterior['direccion']}\n"
@@ -1135,172 +1194,9 @@ def descartar_prealerta(
             f"{anterior['score']}/100\n\n"
             "🧠 Motivo:\n"
             f"{motivo}\n\n"
-            "🔍 La estructura ya no "
-            "cumple las condiciones."
+            "🔍 Setup invalidado."
         )
-        }
-
-
-# ============================================================
-# DIAGNÓSTICO DE CONFIRMACIÓN
-# ============================================================
-
-def diagnosticar_confirmacion(
-    direccion,
-    estado,
-    estructura5,
-    estructura15,
-    momentum5,
-    continuacion5
-):
-
-    razones = []
-
-    precio = momentum5["precio"]
-
-    if direccion == "COMPRA":
-
-        ok_5m = (
-            estructura5["regimen"]
-            == "ALCISTA"
-        )
-
-        ok_15m = (
-            estructura15["regimen"]
-            in ["ALCISTA", "TRANSICION"]
-        )
-
-        ok_continuacion = (
-            continuacion5[
-                "continuacion_compra"
-            ]
-        )
-
-        ok_rsi = (
-            momentum5["rsi"]
-            >= RSI_CONFIRMACION_COMPRA
-        )
-
-        ok_adx = (
-            momentum5["adx"]
-            >= ADX_MINIMO
-        )
-
-        ok_precio = (
-            precio >= estado["precio"]
-        )
-
-        if not ok_5m:
-
-            razones.append(
-                "5M aún no es ALCISTA"
-            )
-
-        if not ok_15m:
-
-            razones.append(
-                "15M no acompaña la COMPRA"
-            )
-
-        if not ok_continuacion:
-
-            razones.append(
-                "falta continuación alcista"
-            )
-
-        if not ok_rsi:
-
-            razones.append(
-                f"RSI {momentum5['rsi']:.2f} "
-                f"< {RSI_CONFIRMACION_COMPRA}"
-            )
-
-        if not ok_adx:
-
-            razones.append(
-                f"ADX {momentum5['adx']:.2f} "
-                f"< {ADX_MINIMO}"
-            )
-
-        if not ok_precio:
-
-            razones.append(
-                "precio aún no supera "
-                "la referencia de prealerta"
-            )
-
-    else:
-
-        ok_5m = (
-            estructura5["regimen"]
-            == "BAJISTA"
-        )
-
-        ok_15m = (
-            estructura15["regimen"]
-            in ["BAJISTA", "TRANSICION"]
-        )
-
-        ok_continuacion = (
-            continuacion5[
-                "continuacion_venta"
-            ]
-        )
-
-        ok_rsi = (
-            momentum5["rsi"]
-            <= RSI_CONFIRMACION_VENTA
-        )
-
-        ok_adx = (
-            momentum5["adx"]
-            >= ADX_MINIMO
-        )
-
-        ok_precio = (
-            precio <= estado["precio"]
-        )
-
-        if not ok_5m:
-
-            razones.append(
-                "5M aún no es BAJISTA"
-            )
-
-        if not ok_15m:
-
-            razones.append(
-                "15M no acompaña la VENTA"
-            )
-
-        if not ok_continuacion:
-
-            razones.append(
-                "falta continuación bajista"
-            )
-
-        if not ok_rsi:
-
-            razones.append(
-                f"RSI {momentum5['rsi']:.2f} "
-                f"> {RSI_CONFIRMACION_VENTA}"
-            )
-
-        if not ok_adx:
-
-            razones.append(
-                f"ADX {momentum5['adx']:.2f} "
-                f"< {ADX_MINIMO}"
-            )
-
-        if not ok_precio:
-
-            razones.append(
-                "precio aún no rompe "
-                "la referencia de prealerta"
-            )
-
-    return razones
+    }
 
 
 # ============================================================
@@ -1308,17 +1204,31 @@ def diagnosticar_confirmacion(
 # ============================================================
 
 def confirmar_prealerta(
-    df5,
-    df15,
     estructura5,
     estructura15,
     momentum5,
     continuacion5
 ):
 
-    if not prealerta_vigente():
+    global estado_prealerta
+
+    if not estado_prealerta:
 
         return None
+
+    # --------------------------------------------------------
+    # IMPORTANTE:
+    # Primero comprobamos EXPIRACIÓN.
+    # --------------------------------------------------------
+
+    edad = (
+        time.time()
+        - estado_prealerta["timestamp"]
+    )
+
+    if edad > MINUTOS_PREALERTA * 60:
+
+        return expirar_prealerta()
 
     p = estado_prealerta
 
@@ -1328,86 +1238,218 @@ def confirmar_prealerta(
     rsi = momentum5["rsi"]
     adx = momentum5["adx"]
 
+    # ========================================================
+    # COMPRA
+    # ========================================================
+
     if direccion == "COMPRA":
 
-        confirmada = (
-            estructura5["regimen"] == "ALCISTA"
-            and estructura15["regimen"]
-            in ["ALCISTA", "TRANSICION"]
-            and continuacion5[
-                "continuacion_compra"
-            ]
-            and rsi >= RSI_CONFIRMACION_COMPRA
-            and adx >= ADX_MINIMO
-            and precio >= p["precio"]
-        )
-
         invalidada = (
-            estructura5["regimen"] == "BAJISTA"
-            or precio < (
+            estructura5["regimen"]
+            == "BAJISTA"
+            or
+            precio < (
                 p["precio"]
                 - p["atr"] * 0.80
             )
         )
 
-    else:
+        if invalidada:
+
+            return descartar_prealerta(
+                "La estructura alcista "
+                "se perdió o el precio "
+                "invalidó la prealerta."
+            )
 
         confirmada = (
-            estructura5["regimen"] == "BAJISTA"
-            and estructura15["regimen"]
-            in ["BAJISTA", "TRANSICION"]
-            and continuacion5[
-                "continuacion_venta"
+            estructura5["regimen"]
+            == "ALCISTA"
+
+            and
+
+            estructura15["regimen"]
+            in [
+                "ALCISTA",
+                "TRANSICION"
             ]
-            and rsi <= RSI_CONFIRMACION_VENTA
-            and adx >= ADX_MINIMO
-            and precio <= p["precio"]
+
+            and
+
+            continuacion5[
+                "continuacion_compra"
+            ]
+
+            and
+
+            rsi >= RSI_CONFIRMACION_COMPRA
+
+            and
+
+            adx >= ADX_MINIMO
+
+            and
+
+            precio >= p["precio"]
         )
 
-        invalidada = (
-            estructura5["regimen"] == "ALCISTA"
-            or precio > (
-                p["precio"]
-                + p["atr"] * 0.80
+        if confirmada:
+
+            return True
+
+        motivos = []
+
+        if estructura5["regimen"] != "ALCISTA":
+            motivos.append(
+                "5M aún no está alcista"
             )
-        )
 
-    # --------------------------------------------------------
-    # INVALIDACIÓN
-    # --------------------------------------------------------
+        if estructura15["regimen"] not in [
+            "ALCISTA",
+            "TRANSICION"
+        ]:
+            motivos.append(
+                "15M no acompaña"
+            )
+
+        if not continuacion5[
+            "continuacion_compra"
+        ]:
+            motivos.append(
+                "falta continuación"
+            )
+
+        if rsi < RSI_CONFIRMACION_COMPRA:
+            motivos.append(
+                "RSI aún no confirma"
+            )
+
+        if adx < ADX_MINIMO:
+            motivos.append(
+                "ADX insuficiente"
+            )
+
+        return {
+            "tipo": "ESPERANDO",
+            "id": p["id"],
+            "mensaje": (
+                "⏳ XAU SNIPER AI V4.2\n\n"
+                "⚠️ PREALERTA ACTIVA\n\n"
+                f"🆔 ID: {p['id']}\n"
+                "🟢 Dirección: COMPRA\n\n"
+                "🔍 Todavía NO confirmada.\n\n"
+                "Falta:\n"
+                + "\n".join(
+                    f"• {m}"
+                    for m in motivos
+                )
+            )
+        }
+
+    # ========================================================
+    # VENTA
+    # ========================================================
+
+    invalidada = (
+        estructura5["regimen"]
+        == "ALCISTA"
+        or
+        precio > (
+            p["precio"]
+            + p["atr"] * 0.80
+        )
+    )
 
     if invalidada:
 
         return descartar_prealerta(
-            "La dirección perdió "
-            "la estructura o el precio "
-            "se movió contra la referencia."
+            "La estructura bajista "
+            "se perdió o el precio "
+            "invalidó la prealerta."
         )
 
-    # --------------------------------------------------------
-    # CONFIRMACIÓN
-    # --------------------------------------------------------
+    confirmada = (
+        estructura5["regimen"]
+        == "BAJISTA"
+
+        and
+
+        estructura15["regimen"]
+        in [
+            "BAJISTA",
+            "TRANSICION"
+        ]
+
+        and
+
+        continuacion5[
+            "continuacion_venta"
+        ]
+
+        and
+
+        rsi <= RSI_CONFIRMACION_VENTA
+
+        and
+
+        adx >= ADX_MINIMO
+
+        and
+
+        precio <= p["precio"]
+    )
 
     if confirmada:
 
         return True
 
-    # --------------------------------------------------------
-    # DIAGNÓSTICO
-    # --------------------------------------------------------
+    motivos = []
 
-    faltantes = diagnosticar_confirmacion(
-        direccion,
-        p,
-        estructura5,
-        estructura15,
-        momentum5,
-        continuacion5
-    )
+    if estructura5["regimen"] != "BAJISTA":
+        motivos.append(
+            "5M aún no está bajista"
+        )
+
+    if estructura15["regimen"] not in [
+        "BAJISTA",
+        "TRANSICION"
+    ]:
+        motivos.append(
+            "15M no acompaña"
+        )
+
+    if not continuacion5[
+        "continuacion_venta"
+    ]:
+        motivos.append(
+            "falta continuación"
+        )
+
+    if rsi > RSI_CONFIRMACION_VENTA:
+        motivos.append(
+            "RSI aún no confirma"
+        )
+
+    if adx < ADX_MINIMO:
+        motivos.append(
+            "ADX insuficiente"
+        )
 
     return {
         "tipo": "ESPERANDO",
-        "faltantes": faltantes
+        "id": p["id"],
+        "mensaje": (
+            "⏳ XAU SNIPER AI V4.2\n\n"
+            "⚠️ PREALERTA ACTIVA\n\n"
+            f"🆔 ID: {p['id']}\n"
+            "🔴 Dirección: VENTA\n\n"
+            "🔍 Todavía NO confirmada.\n\n"
+            "Falta:\n"
+            + "\n".join(
+                f"• {m}"
+                for m in motivos
+            )
+        )
     }
 
 
@@ -1435,13 +1477,15 @@ def construir_prealerta(
     )
 
     return (
-        f"{emoji} XAU SNIPER AI V4.1\n\n"
+        f"{emoji} XAU SNIPER AI V4.2\n\n"
         f"⚠️ PREALERTA {direccion}\n\n"
         f"🆔 ID: {identificador}\n"
         f"📊 Score: {score}/100\n"
         f"💰 Precio: {precio_fmt(precio)}\n\n"
-        f"📈 5M: {estructura5['regimen']}\n"
-        f"📊 15M: {estructura15['regimen']}\n\n"
+        f"📈 5M: "
+        f"{estructura5['regimen']}\n"
+        f"📊 15M: "
+        f"{estructura15['regimen']}\n\n"
         f"RSI 5M: "
         f"{numero_fmt(momentum5['rsi'])}\n"
         f"ADX 5M: "
@@ -1455,13 +1499,11 @@ def construir_prealerta(
         f"🎯 TP referencia: "
         f"{precio_fmt(tp)}\n"
         f"📐 RR: 1:{numero_fmt(rr)}\n\n"
-        "🧠 Estructura detectada.\n"
-        "🔄 Esperando pullback + "
-        "continuación.\n\n"
-        f"⏱️ Ventana máxima: "
-        f"{PREALERTA_MAX_MINUTOS} min\n"
+        "🧠 Estructura + movimiento "
+        "detectados.\n"
+        "🔄 Esperando continuación.\n\n"
         "⚠️ AÚN NO CONFIRMADA"
-        )
+    )
 
 
 # ============================================================
@@ -1488,19 +1530,25 @@ def construir_confirmacion(
     )
 
     return (
-        f"{emoji} XAU SNIPER AI V4.1\n\n"
+        f"{emoji} XAU SNIPER AI V4.2\n\n"
         f"🔥 ALERTA CONFIRMADA: "
         f"{direccion}\n\n"
         f"🆔 ID: {identificador}\n"
         f"📊 Score: {score}/100\n"
         f"💰 Entrada referencia: "
         f"{precio_fmt(precio)}\n\n"
-        f"📈 5M: {estructura5['regimen']}\n"
-        f"📊 15M: {estructura15['regimen']}\n\n"
+        f"📈 5M: "
+        f"{estructura5['regimen']}\n"
+        f"📊 15M: "
+        f"{estructura15['regimen']}\n\n"
         f"RSI: "
         f"{numero_fmt(momentum5['rsi'])}\n"
         f"ADX: "
-        f"{numero_fmt(momentum5['adx'])}\n\n"
+        f"{numero_fmt(momentum5['adx'])}\n"
+        f"DI+: "
+        f"{numero_fmt(momentum5['di_plus'])}\n"
+        f"DI-: "
+        f"{numero_fmt(momentum5['di_minus'])}\n\n"
         f"🛑 SL referencia: "
         f"{precio_fmt(sl)}\n"
         f"🎯 TP referencia: "
@@ -1521,60 +1569,52 @@ def construir_diagnostico(
     estructura15,
     momentum5,
     pullback5,
-    continuacion5
+    continuacion5,
+    score_compra,
+    score_venta
 ):
 
     return (
         "📋 DIAGNÓSTICO XAU SNIPER\n\n"
         f"5M: {estructura5['regimen']}\n"
         f"15M: {estructura15['regimen']}\n\n"
+
         f"RSI: "
         f"{numero_fmt(momentum5['rsi'])}\n"
+
         f"ADX: "
         f"{numero_fmt(momentum5['adx'])}\n"
+
         f"DI+: "
         f"{numero_fmt(momentum5['di_plus'])}\n"
+
         f"DI-: "
         f"{numero_fmt(momentum5['di_minus'])}\n\n"
-        f"Pullback compra: "
+
+        f"🎯 Score COMPRA: "
+        f"{score_compra}/100\n"
+
+        f"🎯 Score VENTA: "
+        f"{score_venta}/100\n\n"
+
+        f"🔄 Pullback compra: "
         f"{pullback5['pullback_compra']}\n"
-        f"Pullback venta: "
+
+        f"🔄 Pullback venta: "
         f"{pullback5['pullback_venta']}\n\n"
-        f"Continuación compra: "
+
+        f"💥 Impulso compra: "
+        f"{pullback5['impulso_previo_compra']}\n"
+
+        f"💥 Impulso venta: "
+        f"{pullback5['impulso_previo_venta']}\n\n"
+
+        f"🚀 Continuación compra: "
         f"{continuacion5['continuacion_compra']}\n"
-        f"Continuación venta: "
+
+        f"🚀 Continuación venta: "
         f"{continuacion5['continuacion_venta']}"
     )
-
-
-# ============================================================
-# DIAGNÓSTICO DE PREALERTA ACTIVA
-# ============================================================
-
-def construir_diagnostico_espera(
-    faltantes
-):
-
-    if not faltantes:
-
-        return (
-            "⏳ Prealerta activa.\n"
-            "Esperando confirmación."
-        )
-
-    texto = (
-        "⏳ PREALERTA ACTIVA\n\n"
-        "Todavía NO confirmada.\n\n"
-        "🔎 Falta:\n"
-    )
-
-    for falta in faltantes:
-
-        texto += (
-            f"❌ {falta}\n"
-        )
-
-    return texto
 
 
 # ============================================================
@@ -1588,46 +1628,12 @@ def construir_error(
     return {
         "tipo": "ERROR",
         "mensaje": (
-            "❌ XAU SNIPER AI V4.1\n\n"
+            "❌ XAU SNIPER AI V4.2\n\n"
             "⚠️ Error de datos / motor\n\n"
             f"{mensaje}\n\n"
             "📡 Proveedor: BiQuote\n"
             "🛑 El bot continúa ejecutándose."
         )
-    }
-
-
-# ============================================================
-# RESUMEN DE ESTADO PREALERTA
-# ============================================================
-
-def obtener_estado_prealerta():
-
-    if estado_prealerta is None:
-
-        return None
-
-    edad = (
-        time.time()
-        - estado_prealerta["timestamp"]
-    )
-
-    restante = max(
-        0,
-        PREALERTA_MAX_MINUTOS * 60
-        - edad
-    )
-
-    return {
-        "id": estado_prealerta["id"],
-        "direccion":
-            estado_prealerta["direccion"],
-        "precio":
-            estado_prealerta["precio"],
-        "score":
-            estado_prealerta["score"],
-        "edad_segundos": edad,
-        "restante_segundos": restante
     }
 
 
@@ -1640,6 +1646,8 @@ def analizar():
     global estado_prealerta
     global ultima_confirmacion_id
     global ultima_confirmacion_timestamp
+    global ultima_vela_5m
+    global ultima_vela_15m
 
     try:
 
@@ -1668,6 +1676,39 @@ def analizar():
         )
 
         # ----------------------------------------------------
+        # ÚLTIMA VELA
+        # ----------------------------------------------------
+
+        vela5 = str(
+            df5["openTime"].iloc[-1]
+        )
+
+        vela15 = str(
+            df15["openTime"].iloc[-1]
+        )
+
+        print(
+            f"🕐 Última vela 5M: {vela5}"
+        )
+
+        print(
+            f"🕐 Última vela 15M: {vela15}"
+        )
+
+        if (
+            ultima_vela_5m == vela5
+            and ultima_vela_15m == vela15
+        ):
+
+            print(
+                "ℹ️ No hay velas nuevas "
+                "desde el análisis anterior."
+            )
+
+        ultima_vela_5m = vela5
+        ultima_vela_15m = vela15
+
+        # ----------------------------------------------------
         # INDICADORES
         # ----------------------------------------------------
 
@@ -1685,14 +1726,21 @@ def analizar():
         # ESTRUCTURA
         # ----------------------------------------------------
 
-        estructura5 = evaluar_estructura(df5)
-        estructura15 = evaluar_estructura(df15)
+        estructura5 = evaluar_estructura(
+            df5
+        )
+
+        estructura15 = evaluar_estructura(
+            df15
+        )
 
         # ----------------------------------------------------
         # MOMENTUM
         # ----------------------------------------------------
 
-        momentum5 = evaluar_momentum(df5)
+        momentum5 = evaluar_momentum(
+            df5
+        )
 
         # ----------------------------------------------------
         # PULLBACK
@@ -1738,14 +1786,36 @@ def analizar():
             f"{momentum5['adx']:.2f}"
         )
 
-        print(
-            f"DI+: "
-            f"{momentum5['di_plus']:.2f}"
+        # ====================================================
+        # SCORE
+        # ====================================================
+
+        score_compra, razones_compra = (
+            calcular_score_compra(
+                estructura5,
+                momentum5,
+                pullback5,
+                continuacion5
+            )
+        )
+
+        score_venta, razones_venta = (
+            calcular_score_venta(
+                estructura5,
+                momentum5,
+                pullback5,
+                continuacion5
+            )
         )
 
         print(
-            f"DI-: "
-            f"{momentum5['di_minus']:.2f}"
+            f"🎯 Score COMPRA: "
+            f"{score_compra}/100"
+        )
+
+        print(
+            f"🎯 Score VENTA: "
+            f"{score_venta}/100"
         )
 
         # ====================================================
@@ -1754,94 +1824,28 @@ def analizar():
 
         if estado_prealerta is not None:
 
-            # ------------------------------------------------
-            # PRIMERO: revisar expiración
-            # ------------------------------------------------
-
-            expiracion = (
-                revisar_expiracion_prealerta()
-            )
-
-            if expiracion is not None:
-
-                print(
-                    "⏰ PREALERTA EXPIRADA"
-                )
-
-                return expiracion
-
-            # ------------------------------------------------
-            # TODAVÍA VIGENTE
-            # ------------------------------------------------
-
             print(
                 "⚠️ PREALERTA ACTIVA: "
                 f"{estado_prealerta['id']}"
             )
 
-            confirmacion = confirmar_prealerta(
-                df5,
-                df15,
-                estructura5,
-                estructura15,
-                momentum5,
-                continuacion5
+            resultado_confirmacion = (
+                confirmar_prealerta(
+                    estructura5,
+                    estructura15,
+                    momentum5,
+                    continuacion5
+                )
             )
 
-            # ------------------------------------------------
-            # DESCARTADA
-            # ------------------------------------------------
-
             if isinstance(
-                confirmacion,
+                resultado_confirmacion,
                 dict
             ):
 
-                if confirmacion.get(
-                    "tipo"
-                ) == "DESCARTADA":
+                return resultado_confirmacion
 
-                    return confirmacion
-
-                # --------------------------------------------
-                # ESPERANDO
-                # --------------------------------------------
-
-                if confirmacion.get(
-                    "tipo"
-                ) == "ESPERANDO":
-
-                    faltantes = (
-                        confirmacion.get(
-                            "faltantes",
-                            []
-                        )
-                    )
-
-                    print(
-                        "⏳ Prealerta "
-                        "todavía esperando."
-                    )
-
-                    for falta in faltantes:
-
-                        print(
-                            f"   ❌ {falta}"
-                        )
-
-                    return {
-                        "tipo": "SIN_SEÑAL",
-                        "mensaje": (
-                            "⏳ Prealerta activa. "
-                            "Esperando confirmación."
-                        )
-                    }
-
-            # ------------------------------------------------
-            # CONFIRMADA
-            # ------------------------------------------------
-
-            if confirmacion is True:
+            if resultado_confirmacion is True:
 
                 direccion = (
                     estado_prealerta[
@@ -1944,95 +1948,61 @@ def analizar():
                 "mensaje": (
                     "🧊 Cooldown activo."
                 )
-            }
+                }
+
 
         # ====================================================
-        # SCORE
-        # ====================================================
-
-        score_compra, razones_compra = (
-            calcular_score_compra(
-                estructura5,
-                momentum5,
-                pullback5,
-                continuacion5
-            )
-        )
-
-        score_venta, razones_venta = (
-            calcular_score_venta(
-                estructura5,
-                momentum5,
-                pullback5,
-                continuacion5
-            )
-        )
-
-        print(
-            f"🎯 Score COMPRA: "
-            f"{score_compra}/100"
-        )
-
-        print(
-            f"🎯 Score VENTA: "
-            f"{score_venta}/100"
-        )
-
-        # ====================================================
-        # SETUP COMPRA
+        # SETUP DE PREALERTA
         #
-        # CAMBIO:
-        # Permitimos ALCISTA o TRANSICION.
-        # La confirmación sigue exigiendo ALCISTA.
+        # AQUÍ ESTÁ EL CAMBIO IMPORTANTE:
+        #
+        # Ya NO exigimos momentum completo para crear
+        # una prealerta.
+        #
+        # El momentum fuerte queda para CONFIRMACIÓN.
         # ====================================================
 
         setup_compra = (
             estructura5["regimen"]
-            in [
-                "ALCISTA",
-                "TRANSICION"
-            ]
+            == "ALCISTA"
+
             and
+
             estructura15["regimen"]
             in [
                 "ALCISTA",
                 "TRANSICION"
             ]
+
             and
-            momentum5["momentum_alcista"]
-            and
+
             momentum5["adx"]
             >= ADX_MINIMO
+
             and
+
             pullback5["pullback_compra"]
         )
 
-        # ====================================================
-        # SETUP VENTA
-        #
-        # CAMBIO:
-        # Permitimos BAJISTA o TRANSICION.
-        # La confirmación sigue exigiendo BAJISTA.
-        # ====================================================
-
         setup_venta = (
             estructura5["regimen"]
-            in [
-                "BAJISTA",
-                "TRANSICION"
-            ]
+            == "BAJISTA"
+
             and
+
             estructura15["regimen"]
             in [
                 "BAJISTA",
                 "TRANSICION"
             ]
+
             and
-            momentum5["momentum_bajista"]
-            and
+
             momentum5["adx"]
             >= ADX_MINIMO
+
             and
+
             pullback5["pullback_venta"]
         )
 
@@ -2042,7 +2012,7 @@ def analizar():
 
         if (
             setup_compra
-            and score_compra >= 55
+            and score_compra >= 50
         ):
 
             direccion = "COMPRA"
@@ -2101,8 +2071,7 @@ def analizar():
                 "tipo": "PREALERTA",
                 "id": identificador,
                 "mensaje": mensaje
-}
-
+            }
 
         # ====================================================
         # PREALERTA VENTA
@@ -2110,7 +2079,7 @@ def analizar():
 
         if (
             setup_venta
-            and score_venta >= 55
+            and score_venta >= 50
         ):
 
             direccion = "VENTA"
@@ -2180,7 +2149,9 @@ def analizar():
             estructura15,
             momentum5,
             pullback5,
-            continuacion5
+            continuacion5,
+            score_compra,
+            score_venta
         )
 
         print(diagnostico)
@@ -2226,5 +2197,5 @@ def analizar():
 
 
 # ============================================================
-# FIN XAU SNIPER AI V4.1
+# FIN XAU SNIPER AI V4.2
 # ============================================================
