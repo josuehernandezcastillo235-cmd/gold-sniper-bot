@@ -2081,3 +2081,1010 @@ def mensaje_error(mensaje):
 # ============================================================
 # FIN PARTE 7/9
 # ============================================================
+
+
+# ============================================================
+# XAU SNIPER AI V4.2
+# PARTE 8/9
+# MOTOR DE DECISIÓN
+# ============================================================
+
+
+# ============================================================
+# CONSTRUIR DIAGNÓSTICO
+# ============================================================
+
+def construir_diagnostico(
+    precio,
+    estructura5,
+    estructura15,
+    regimen,
+    direccion,
+    impulso,
+    pullback,
+    continuacion,
+    momentum,
+    score_compra,
+    score_venta
+):
+
+    estructura5_texto = (
+        estructura5["estado"]
+    )
+
+    estructura15_texto = (
+        estructura15["estado"]
+    )
+
+    return (
+        "📋 DIAGNÓSTICO XAU SNIPER\n"
+        f"5M: {estructura5_texto}\n"
+        f"15M: {estructura15_texto}\n"
+        f"🌐 Régimen: {regimen}\n"
+        f"🧭 Dirección: {direccion}\n\n"
+        f"💰 Precio: {fmt(precio)}\n"
+        f"RSI: {fmt(momentum['rsi'])}\n"
+        f"ADX: {fmt(momentum['adx'])}\n"
+        f"DI+: {fmt(momentum['di_plus'])}\n"
+        f"DI-: {fmt(momentum['di_minus'])}\n\n"
+        f"🏗 Estructura 5M: "
+        f"{estructura5_texto}\n"
+        f"🏗 Estructura 15M: "
+        f"{estructura15_texto}\n\n"
+        f"💥 Impulso compra: "
+        f"{impulso['compra']}\n"
+        f"💥 Impulso venta: "
+        f"{impulso['venta']}\n"
+        f"💪 Fuerza compra: "
+        f"{impulso['fuerza_compra']}\n"
+        f"💪 Fuerza venta: "
+        f"{impulso['fuerza_venta']}\n\n"
+        f"🔄 Pullback: {pullback}\n"
+        f"🚀 Continuación: "
+        f"{continuacion}\n\n"
+        f"🎯 Score COMPRA: "
+        f"{score_compra}/100\n"
+        f"🎯 Score VENTA: "
+        f"{score_venta}/100"
+    )
+
+
+# ============================================================
+# ANALIZAR
+# ============================================================
+
+def analizar():
+
+    global ultima_senal_id
+    global ultimo_timestamp_5m
+    global ultimo_timestamp_15m
+
+    try:
+
+        print("")
+        print(
+            "==================================="
+        )
+        print(
+            "🔍 ANALIZANDO XAU/USD..."
+        )
+        print(
+            "==================================="
+        )
+
+        # ====================================================
+        # API
+        # ====================================================
+
+        print(
+            "📡 Descargando datos desde "
+            "Twelve Data..."
+        )
+
+        bruto5 = descargar_velas(
+            INTERVALO_5M,
+            VELAS_5M
+        )
+
+        bruto15 = descargar_velas(
+            INTERVALO_15M,
+            VELAS_15M
+        )
+
+        print(
+            f"✅ Twelve Data 5M: "
+            f"{len(bruto5)} velas"
+        )
+
+        print(
+            f"✅ Twelve Data 15M: "
+            f"{len(bruto15)} velas"
+        )
+
+        # ====================================================
+        # SOLO VELAS CERRADAS
+        # ====================================================
+
+        df5, ts5, edad5 = (
+            obtener_velas_cerradas(
+                bruto5,
+                INTERVALO_5M
+            )
+        )
+
+        df15, ts15, edad15 = (
+            obtener_velas_cerradas(
+                bruto15,
+                INTERVALO_15M
+            )
+        )
+
+        print(
+            f"🕐 Última vela 5M: "
+            f"{ts5}"
+        )
+
+        print(
+            f"🕐 Edad vela 5M: "
+            f"{edad5:.1f} minutos"
+        )
+
+        print(
+            f"🕐 Última vela 15M: "
+            f"{ts15}"
+        )
+
+        print(
+            f"🕐 Edad vela 15M: "
+            f"{edad15:.1f} minutos"
+        )
+
+        # ====================================================
+        # DETECTAR NUEVAS VELAS
+        # ====================================================
+
+        datos_nuevos = (
+            ts5 != ultimo_timestamp_5m
+            or
+            ts15 != ultimo_timestamp_15m
+        )
+
+        if datos_nuevos:
+
+            print(
+                "🆕 Hay cierre de vela nuevo."
+            )
+
+        else:
+
+            print(
+                "ℹ️ No hay velas cerradas "
+                "nuevas desde el análisis anterior."
+            )
+
+        ultimo_timestamp_5m = ts5
+        ultimo_timestamp_15m = ts15
+
+        # ====================================================
+        # INDICADORES
+        # ====================================================
+
+        df5 = calcular_indicadores(
+            df5
+        )
+
+        df15 = calcular_indicadores(
+            df15
+        )
+
+        # Eliminamos filas donde todavía no existen
+        # indicadores suficientes.
+
+        df5 = df5.dropna(
+            subset=[
+                "atr",
+                "rsi",
+                "adx",
+                "di_plus",
+                "di_minus"
+            ]
+        ).reset_index(
+            drop=True
+        )
+
+        df15 = df15.dropna(
+            subset=[
+                "atr",
+                "rsi",
+                "adx",
+                "di_plus",
+                "di_minus"
+            ]
+        ).reset_index(
+            drop=True
+        )
+
+        if len(df5) < 50:
+
+            raise RuntimeError(
+                "Muy pocos datos útiles en 5M."
+            )
+
+        if len(df15) < 50:
+
+            raise RuntimeError(
+                "Muy pocos datos útiles en 15M."
+            )
+
+        # ====================================================
+        # ESTRUCTURA
+        # ====================================================
+
+        estructura5 = analizar_estructura(
+            df5
+        )
+
+        estructura15 = analizar_estructura(
+            df15
+        )
+
+        # ====================================================
+        # RÉGIMEN
+        # ====================================================
+
+        regimen = determinar_regimen(
+            estructura5,
+            estructura15,
+            df5,
+            df15
+        )
+
+        # ====================================================
+        # IMPULSO
+        # ====================================================
+
+        impulso = detectar_impulso(
+            df5
+        )
+
+        # ====================================================
+        # DIRECCIÓN
+        # ====================================================
+
+        direccion = determinar_direccion(
+            regimen,
+            estructura5,
+            estructura15,
+            impulso
+        )
+
+        # ====================================================
+        # PRECIO
+        # ====================================================
+
+        precio = float(
+            df5.iloc[-1]["close"]
+        )
+
+        # ====================================================
+        # PULLBACK
+        # ====================================================
+
+        pullback = detectar_pullback(
+            df5,
+            direccion
+        )
+
+        # ====================================================
+        # CONTINUACIÓN
+        # ====================================================
+
+        continuacion = detectar_continuacion(
+            df5,
+            direccion
+        )
+
+        # ====================================================
+        # LIQUIDEZ
+        # ====================================================
+
+        liquidez = analizar_liquidez(
+            df5
+        )
+
+        # ====================================================
+        # MOMENTUM
+        # ====================================================
+
+        momentum = analizar_momentum(
+            df5
+        )
+
+        # ====================================================
+        # SCORES
+        # ====================================================
+
+        score_compra, razones_compra = (
+            calcular_score(
+                "COMPRA",
+                regimen,
+                estructura5,
+                estructura15,
+                impulso,
+                detectar_pullback(
+                    df5,
+                    "COMPRA"
+                ),
+                detectar_continuacion(
+                    df5,
+                    "COMPRA"
+                ),
+                liquidez,
+                momentum
+            )
+        )
+
+        score_venta, razones_venta = (
+            calcular_score(
+                "VENTA",
+                regimen,
+                estructura5,
+                estructura15,
+                impulso,
+                detectar_pullback(
+                    df5,
+                    "VENTA"
+                ),
+                detectar_continuacion(
+                    df5,
+                    "VENTA"
+                ),
+                liquidez,
+                momentum
+            )
+        )
+
+        # ====================================================
+        # PRINT LIMPIO
+        # ====================================================
+
+        print(
+            f"📊 5M: "
+            f"{estructura5['estado']}"
+        )
+
+        print(
+            f"📊 15M: "
+            f"{estructura15['estado']}"
+        )
+
+        print(
+            f"🌐 Régimen: {regimen}"
+        )
+
+        print(
+            f"💰 Precio: {fmt(precio)}"
+        )
+
+        print(
+            f"RSI: {fmt(momentum['rsi'])}"
+        )
+
+        print(
+            f"ADX: {fmt(momentum['adx'])}"
+        )
+
+        print(
+            f"💥 Impulso COMPRA: "
+            f"{impulso['compra']}"
+        )
+
+        print(
+            f"💥 Impulso VENTA: "
+            f"{impulso['venta']}"
+        )
+
+        print(
+            f"⚖️ Conflicto impulso: "
+            f"{impulso['compra'] and impulso['venta']}"
+        )
+
+        print(
+            f"🧭 Dirección: {direccion}"
+        )
+
+        print(
+            f"🔄 Pullback: {pullback}"
+        )
+
+        print(
+            f"🚀 Continuación: "
+            f"{continuacion}"
+        )
+
+        print(
+            f"🎯 Score COMPRA: "
+            f"{score_compra}/100"
+        )
+
+        print(
+            f"🎯 Score VENTA: "
+            f"{score_venta}/100"
+        )
+
+        # ====================================================
+        # DIAGNÓSTICO
+        # ====================================================
+
+        print(
+            construir_diagnostico(
+                precio,
+                estructura5,
+                estructura15,
+                regimen,
+                direccion,
+                impulso,
+                pullback,
+                continuacion,
+                momentum,
+                score_compra,
+                score_venta
+            )
+        )
+
+        # ====================================================
+        # FIN PARTE 8
+        # ====================================================
+
+        return _decidir_senal(
+            precio=precio,
+            df5=df5,
+            estructura5=estructura5,
+            estructura15=estructura15,
+            regimen=regimen,
+            direccion=direccion,
+            impulso=impulso,
+            pullback=pullback,
+            continuacion=continuacion,
+            liquidez=liquidez,
+            momentum=momentum,
+            score_compra=score_compra,
+            score_venta=score_venta,
+            datos_nuevos=datos_nuevos
+        )
+
+    except Exception as e:
+
+        logger.exception(
+            "❌ Error en analizar()"
+        )
+
+        return mensaje_error(
+            str(e)
+        )
+
+
+# ============================================================
+# FIN PARTE 8/9
+# ============================================================
+
+
+# ============================================================
+# XAU SNIPER AI V4.2
+# PARTE 9/9
+# DECISIÓN FINAL + PREALERTA + CONFIRMACIÓN
+# ============================================================
+
+
+# ============================================================
+# DECISIÓN FINAL
+# ============================================================
+
+def _decidir_senal(
+    precio,
+    df5,
+    estructura5,
+    estructura15,
+    regimen,
+    direccion,
+    impulso,
+    pullback,
+    continuacion,
+    liquidez,
+    momentum,
+    score_compra,
+    score_venta,
+    datos_nuevos
+):
+
+    global ultima_senal_id
+
+    # ========================================================
+    # CONFLICTO REAL
+    # ========================================================
+
+    # El conflicto YA NO se define simplemente porque hubo
+    # velas verdes y rojas.
+    #
+    # Solo existe si los dos lados realmente superan el
+    # umbral de impulso y además tienen fuerzas cercanas.
+
+    diferencia_fuerza = abs(
+        impulso["fuerza_compra"] -
+        impulso["fuerza_venta"]
+    )
+
+    conflicto_impulso = (
+        impulso["compra"]
+        and
+        impulso["venta"]
+        and
+        diferencia_fuerza < 20
+    )
+
+    if conflicto_impulso:
+
+        print(
+            "⚖️ CONFLICTO REAL: "
+            "fuerzas demasiado parejas."
+        )
+
+        return {
+            "tipo": "SIN_SEÑAL",
+            "mensaje": (
+                "😴 SIN_SEÑAL\n\n"
+                "⚖️ Conflicto real de presión.\n"
+                "El mercado no tiene un "
+                "dominante suficientemente claro.\n\n"
+                "🧠 Se evita forzar operación."
+            ),
+            "id": None
+        }
+
+    # ========================================================
+    # DIRECCIÓN NEUTRAL
+    # ========================================================
+
+    if direccion == "NEUTRAL":
+
+        return {
+            "tipo": "SIN_SEÑAL",
+            "mensaje": (
+                "😴 SIN_SEÑAL\n\n"
+                "🧭 Dirección neutral.\n"
+                "No existe ventaja suficiente."
+            ),
+            "id": None
+        }
+
+    # ========================================================
+    # RÉGIMEN LATERAL
+    # ========================================================
+
+    # No prohibimos absolutamente una señal en lateral,
+    # pero exigimos una configuración mucho más fuerte.
+    # Esto evita repetir el caso de score 55 en mercado lateral.
+
+    score_actual = (
+        score_compra
+        if direccion == "COMPRA"
+        else score_venta
+    )
+
+    if regimen == "LATERAL":
+
+        if score_actual < 70:
+
+            print(
+                "🌐 Mercado lateral. "
+                "Score insuficiente."
+            )
+
+            return {
+                "tipo": "SIN_SEÑAL",
+                "mensaje": (
+                    "😴 SIN_SEÑAL\n\n"
+                    "🌐 Régimen: LATERAL\n"
+                    f"🎯 Score: {score_actual}/100\n\n"
+                    "🛑 No se fuerza entrada "
+                    "contra un mercado sin "
+                    "estructura limpia."
+                ),
+                "id": None
+            }
+
+    # ========================================================
+    # FILTRO ESTRUCTURAL
+    # ========================================================
+
+    estructura_direccion = (
+        estructura5["estado"]
+        if direccion == "COMPRA"
+        else estructura5["estado"]
+    )
+
+    if direccion == "COMPRA":
+
+        estructura_ok = (
+            estructura5["estado"] == "ALCISTA"
+            or
+            estructura5["bos_compra"]
+            or
+            estructura5["choch_compra"]
+        )
+
+    else:
+
+        estructura_ok = (
+            estructura5["estado"] == "BAJISTA"
+            or
+            estructura5["bos_venta"]
+            or
+            estructura5["choch_venta"]
+        )
+
+    if not estructura_ok:
+
+        return {
+            "tipo": "SIN_SEÑAL",
+            "mensaje": (
+                "😴 SIN_SEÑAL\n\n"
+                f"🧭 Dirección: {direccion}\n"
+                f"🏗 Estructura 5M: "
+                f"{estructura5['estado']}\n\n"
+                "🛑 Estructura insuficiente "
+                "para operar."
+            ),
+            "id": None
+        }
+
+    # ========================================================
+    # MOMENTUM
+    # ========================================================
+
+    if direccion == "COMPRA":
+
+        momentum_basico = (
+            momentum["rsi"] >= RSI_COMPRA
+            and
+            momentum["di_plus"]
+            >= momentum["di_minus"]
+        )
+
+    else:
+
+        momentum_basico = (
+            momentum["rsi"] <= RSI_VENTA
+            and
+            momentum["di_minus"]
+            >= momentum["di_plus"]
+        )
+
+    # ========================================================
+    # SCORE PREALERTA
+    # ========================================================
+
+    if score_actual < SCORE_PREALERTA:
+
+        print(
+            "😴 Score por debajo de "
+            "prealerta."
+        )
+
+        return {
+            "tipo": "SIN_SEÑAL",
+            "mensaje": (
+                "😴 SIN_SEÑAL\n\n"
+                f"🧭 Dirección: {direccion}\n"
+                f"🎯 Score: "
+                f"{score_actual}/100\n"
+                f"📈 Régimen: {regimen}\n\n"
+                "No existe suficiente ventaja "
+                "estadística para generar "
+                "prealerta."
+            ),
+            "id": None
+        }
+
+    # ========================================================
+    # ID
+    # ========================================================
+
+    # Mientras una configuración siga viva, se mantiene el
+    # mismo ID. Esto permite que bot.py controle correctamente
+    # ESPERANDO y evite spam.
+
+    if ultima_senal_id is None:
+
+        ultima_senal_id = generar_id(
+            direccion,
+            precio
+        )
+
+    identificador = (
+        ultima_senal_id
+    )
+
+    # ========================================================
+    # RIESGO
+    # ========================================================
+
+    riesgo = calcular_riesgo(
+        precio,
+        df5.iloc[-1]["atr"],
+        direccion,
+        estructura5,
+        liquidez
+    )
+
+    if riesgo is None:
+
+        return {
+            "tipo": "SIN_SEÑAL",
+            "mensaje": (
+                "😴 SIN_SEÑAL\n\n"
+                "🛑 No se pudo construir "
+                "un SL/TP válido con "
+                f"RR mínimo {RR_MINIMO:.2f}."
+            ),
+            "id": None
+        }
+
+    # ========================================================
+    # CONFIRMACIÓN
+    # ========================================================
+
+    if direccion == "COMPRA":
+
+        confirmacion_rsi = (
+            momentum["rsi"]
+            >= RSI_CONFIRMACION_COMPRA
+        )
+
+        confirmacion_di = (
+            momentum["di_plus"]
+            >
+            momentum["di_minus"]
+        )
+
+    else:
+
+        confirmacion_rsi = (
+            momentum["rsi"]
+            <= RSI_CONFIRMACION_VENTA
+        )
+
+        confirmacion_di = (
+            momentum["di_minus"]
+            >
+            momentum["di_plus"]
+        )
+
+    confirmacion_adx = (
+        momentum["adx"]
+        >= ADX_CONFIRMACION
+    )
+
+    # La confirmación exige:
+    #
+    # 1. score alto
+    # 2. impulso dominante
+    # 3. continuación
+    # 4. RSI
+    # 5. DI
+    # 6. ADX
+    #
+    # No basta con una sola variable.
+
+    confirmada = (
+        score_actual >= SCORE_CONFIRMACION
+        and
+        (
+            impulso["compra"]
+            if direccion == "COMPRA"
+            else impulso["venta"]
+        )
+        and
+        continuacion
+        and
+        confirmacion_rsi
+        and
+        confirmacion_di
+        and
+        confirmacion_adx
+        and
+        momentum_basico
+    )
+
+    # ========================================================
+    # CONFIRMADA
+    # ========================================================
+
+    if confirmada:
+
+        if cooldown_activo(
+            direccion
+        ):
+
+            print(
+                "⏳ Cooldown activo para "
+                f"{direccion}."
+            )
+
+            return {
+                "tipo": "SIN_SEÑAL",
+                "mensaje": (
+                    "😴 SIN_SEÑAL\n\n"
+                    "⏳ Cooldown activo.\n"
+                    f"🧭 Dirección: {direccion}"
+                ),
+                "id": None
+            }
+
+        registrar_confirmacion(
+            direccion
+        )
+
+        mensaje = (
+            "🥇 XAU SNIPER AI V4.2\n\n"
+            f"🚨 CONFIRMADA {direccion}\n\n"
+            f"🆔 ID: {identificador}\n"
+            f"🎯 Score: {score_actual}/100\n"
+            f"💰 Precio: {fmt(precio)}\n\n"
+            f"📈 5M: {estructura5['estado']}\n"
+            f"📊 15M: {estructura15['estado']}\n"
+            f"🌐 Régimen: {regimen}\n\n"
+            f"RSI: {fmt(momentum['rsi'])}\n"
+            f"ADX: {fmt(momentum['adx'])}\n"
+            f"DI+: {fmt(momentum['di_plus'])}\n"
+            f"DI-: {fmt(momentum['di_minus'])}\n\n"
+            f"🛑 SL: {fmt(riesgo['sl'])}\n"
+            f"🎯 TP: {fmt(riesgo['tp'])}\n"
+            f"📐 RR: 1:{riesgo['rr']:.2f}\n\n"
+            "🧠 Estructura + movimiento "
+            "confirmados.\n"
+            "🚀 Continuación confirmada.\n"
+            "⚠️ PAPER / ESCÁNER"
+        )
+
+        print(
+            "🚨 CONFIRMADA: "
+            f"{direccion}"
+        )
+
+        return {
+            "tipo": "CONFIRMADA",
+            "mensaje": mensaje,
+            "id": identificador
+        }
+
+    # ========================================================
+    # ESPERANDO CONFIRMACIÓN
+    # ========================================================
+
+    faltantes = []
+
+    if not (
+        impulso["compra"]
+        if direccion == "COMPRA"
+        else impulso["venta"]
+    ):
+
+        faltantes.append(
+            "impulso dominante"
+        )
+
+    if not pullback:
+
+        faltantes.append(
+            "pullback"
+        )
+
+    if not continuacion:
+
+        faltantes.append(
+            "continuación"
+        )
+
+    if not confirmacion_rsi:
+
+        faltantes.append(
+            "RSI"
+        )
+
+    if not confirmacion_di:
+
+        faltantes.append(
+            "DI dominante"
+        )
+
+    if not confirmacion_adx:
+
+        faltantes.append(
+            "ADX"
+        )
+
+    # ========================================================
+    # PREALERTA
+    # ========================================================
+
+    if (
+        score_actual >= SCORE_PREALERTA
+        and
+        not confirmada
+    ):
+
+        texto_faltantes = (
+            "\n".join(
+                f"• {x}"
+                for x in faltantes
+            )
+            if faltantes
+            else
+            "• Confirmación final"
+        )
+
+        mensaje = (
+            "🟢 XAU SNIPER AI V4.2\n\n"
+            f"⚠️ PREALERTA {direccion}\n\n"
+            f"🆔 ID: {identificador}\n"
+            f"🎯 Score: "
+            f"{score_actual}/100\n"
+            f"💰 Precio: "
+            f"{fmt(precio)}\n\n"
+            f"📈 5M: "
+            f"{estructura5['estado']}\n"
+            f"📊 15M: "
+            f"{estructura15['estado']}\n"
+            f"🌐 Régimen: {regimen}\n\n"
+            f"RSI: "
+            f"{fmt(momentum['rsi'])}\n"
+            f"ADX: "
+            f"{fmt(momentum['adx'])}\n"
+            f"DI+: "
+            f"{fmt(momentum['di_plus'])}\n"
+            f"DI-: "
+            f"{fmt(momentum['di_minus'])}\n\n"
+            f"🛑 SL referencia: "
+            f"{fmt(riesgo['sl'])}\n"
+            f"🎯 TP referencia: "
+            f"{fmt(riesgo['tp'])}\n"
+            f"📐 RR: "
+            f"1:{riesgo['rr']:.2f}\n\n"
+            "⏳ Esperando confirmación.\n\n"
+            "Falta:\n"
+            f"{texto_faltantes}\n\n"
+            "⚠️ AÚN NO CONFIRMADA"
+        )
+
+        print(
+            f"⚠️ NUEVA PREALERTA {direccion}"
+        )
+
+        return {
+            "tipo": "PREALERTA",
+            "mensaje": mensaje,
+            "id": identificador
+        }
+
+    # ========================================================
+    # SIN SEÑAL
+    # ========================================================
+
+    return {
+        "tipo": "SIN_SEÑAL",
+        "mensaje": (
+            "😴 SIN_SEÑAL\n\n"
+            f"🧭 Dirección: {direccion}\n"
+            f"🎯 Score: {score_actual}/100\n"
+            f"🌐 Régimen: {regimen}\n\n"
+            "No existe confirmación "
+            "suficiente."
+        ),
+        "id": None
+    }
+
+
+# ============================================================
+# FIN XAU SNIPER AI V4.2
+# ============================================================
