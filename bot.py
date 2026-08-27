@@ -18,7 +18,7 @@ from strategy import analizar
 
 
 # =========================================================
-# XAU SNIPER AI V4.1
+# XAU SNIPER AI V4.2
 # =========================================================
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -28,10 +28,11 @@ INTERVALO = 100
 
 
 # =========================================================
-# ESTADO DEL BOT
+# ESTADO
 # =========================================================
 
 bot_encendido = False
+
 ultima_senal = None
 
 
@@ -93,7 +94,7 @@ async def botones(
 
         await query.message.reply_text(
             (
-                "🟢 XAU SNIPER AI V4.1\n\n"
+                "🟢 XAU SNIPER AI V4.2\n\n"
                 "▶️ BOT ENCENDIDO\n\n"
                 "🔍 Analizando XAU/USD...\n"
                 "🧠 Estructura + Movimiento\n"
@@ -105,7 +106,9 @@ async def botones(
             reply_markup=teclado()
         )
 
-        print("🟢 BOT ENCENDIDO")
+        print(
+            "🟢 BOT ENCENDIDO"
+        )
 
         return
 
@@ -115,7 +118,7 @@ async def botones(
 
         await query.message.reply_text(
             (
-                "🔴 XAU SNIPER AI V4.1\n\n"
+                "🔴 XAU SNIPER AI V4.2\n\n"
                 "⏹ BOT APAGADO\n\n"
                 "El análisis automático "
                 "queda detenido.\n\n"
@@ -125,13 +128,15 @@ async def botones(
             reply_markup=teclado()
         )
 
-        print("🔴 BOT APAGADO")
+        print(
+            "🔴 BOT APAGADO"
+        )
 
         return
 
 
 # =========================================================
-# INICIO DE APLICACIÓN
+# INICIO
 # =========================================================
 
 async def inicio(application):
@@ -141,16 +146,16 @@ async def inicio(application):
     bot_encendido = False
 
     print(
-        "🚀 XAU SNIPER AI V4.1 "
+        "🚀 XAU SNIPER AI V4.2 "
         "iniciado correctamente"
     )
 
     await application.bot.send_message(
         chat_id=CHAT_ID,
         text=(
-            "🚀 XAU SNIPER AI V4.1\n\n"
+            "🚀 XAU SNIPER AI V4.2\n\n"
             "✅ Telegram: OK\n"
-            "✅ Motor V4.1: OK\n"
+            "✅ Motor V4.2: OK\n"
             "📡 Datos: BiQuote\n"
             "📊 Mercado: XAU/USD\n"
             "⏱ Revisión: cada 100 segundos\n\n"
@@ -163,7 +168,9 @@ async def inicio(application):
         reply_markup=teclado()
     )
 
-    print("✅ Mensaje de inicio enviado")
+    print(
+        "✅ Mensaje de inicio enviado"
+    )
 
 
 # =========================================================
@@ -188,9 +195,15 @@ async def ejecutar_analisis(
     try:
 
         print("")
-        print("===================================")
-        print("🔍 ANALIZANDO XAU/USD...")
-        print("===================================")
+        print(
+            "==================================="
+        )
+        print(
+            "🔍 ANALIZANDO XAU/USD..."
+        )
+        print(
+            "==================================="
+        )
 
         resultado = analizar()
 
@@ -225,50 +238,27 @@ async def ejecutar_analisis(
             "😴 Sin señal"
         )
 
+        identificador = resultado.get(
+            "id"
+        )
+
         print(
             f"📩 Tipo: {tipo}"
         )
 
         print(mensaje)
 
-        # -------------------------------------------------
+        # =================================================
         # SIN SEÑAL
-        # -------------------------------------------------
+        # =================================================
 
         if tipo == "SIN_SEÑAL":
 
             return
 
-        # -------------------------------------------------
-        # ESPERANDO
-        #
-        # NO se envía cada 100 segundos a Telegram.
-        # El detalle de qué falta queda en Railway.
-        # -------------------------------------------------
-
-        if tipo == "ESPERANDO":
-
-            print(
-                "⏳ Prealerta esperando "
-                "confirmación."
-            )
-
-            faltantes = resultado.get(
-                "faltantes",
-                []
-            )
-
-            for falta in faltantes:
-
-                print(
-                    f"   ❌ {falta}"
-                )
-
-            return
-
-        # -------------------------------------------------
+        # =================================================
         # ERROR
-        # -------------------------------------------------
+        # =================================================
 
         if tipo == "ERROR":
 
@@ -280,18 +270,54 @@ async def ejecutar_analisis(
 
             return
 
-        # -------------------------------------------------
-        # PREALERTA / CONFIRMADA /
-        # DESCARTADA
-        # -------------------------------------------------
+        # =================================================
+        # ESPERANDO
+        #
+        # Ahora SÍ se manda a Telegram.
+        # =================================================
 
-        identificador = resultado.get(
-            "id"
-        )
+        if tipo == "ESPERANDO":
+
+            # No repetir el mismo estado cada 100 segundos.
+            #
+            # Solo enviamos la primera vez que aparece
+            # un ID distinto a ultima_senal.
+
+            if (
+                identificador
+                and identificador == ultima_senal
+            ):
+
+                print(
+                    "⏳ Estado esperando ya "
+                    "notificado."
+                )
+
+                return
+
+            await context.bot.send_message(
+                chat_id=CHAT_ID,
+                text=mensaje,
+                reply_markup=teclado()
+            )
+
+            if identificador:
+
+                ultima_senal = identificador
+
+            return
+
+        # =================================================
+        # PREALERTA / CONFIRMADA / DESCARTADA
+        # =================================================
 
         if (
             identificador
             and identificador == ultima_senal
+            and tipo not in [
+                "DESCARTADA",
+                "CONFIRMADA"
+            ]
         ):
 
             print(
@@ -323,7 +349,7 @@ async def ejecutar_analisis(
 
         print(
             f"❌ ERROR BOT: {e}"
-)
+        )
 
 
 # =========================================================
@@ -341,7 +367,7 @@ async def start(
 
     await update.message.reply_text(
         (
-            "🥇 XAU SNIPER AI V4.1\n\n"
+            "🥇 XAU SNIPER AI V4.2\n\n"
             "🟢 BOT ENCENDIDO\n\n"
             "📊 Mercado: XAU/USD\n"
             "📡 Datos: BiQuote\n"
@@ -354,7 +380,9 @@ async def start(
         reply_markup=teclado()
     )
 
-    print("🟢 /start recibido")
+    print(
+        "🟢 /start recibido"
+    )
 
 
 # =========================================================
@@ -376,7 +404,7 @@ async def status(
 
     await update.message.reply_text(
         (
-            "📊 XAU SNIPER AI V4.1\n\n"
+            "📊 XAU SNIPER AI V4.2\n\n"
             f"Estado: {estado_actual}\n"
             "📈 Mercado: XAU/USD\n"
             "📡 Datos: BiQuote\n"
@@ -384,10 +412,6 @@ async def status(
             "🧠 Motor:\n"
             "Estructura + Impulso + "
             "Pullback + Continuación\n\n"
-            "⏱️ Prealerta máxima: "
-            "30 minutos\n"
-            "🧊 Cooldown: "
-            "15 minutos\n\n"
             "⚠️ Modo: PAPER / ESCÁNER"
         ),
         reply_markup=teclado()
@@ -413,14 +437,23 @@ def main():
         )
 
     print(
-        "🚀 Iniciando XAU SNIPER AI V4.1..."
+        "🚀 Iniciando XAU SNIPER AI V4.2..."
     )
 
-    print("📊 Mercado: XAU/USD")
-    print("📡 Proveedor: BiQuote")
-    print("⏱ Intervalo: 100 segundos")
     print(
-        "🧠 Motor V4.1: "
+        "📊 Mercado: XAU/USD"
+    )
+
+    print(
+        "📡 Proveedor: BiQuote"
+    )
+
+    print(
+        "⏱ Intervalo: 100 segundos"
+    )
+
+    print(
+        "🧠 Motor V4.2: "
         "estructura + movimiento"
     )
 
@@ -456,18 +489,20 @@ def main():
         raise RuntimeError(
             "❌ JobQueue no disponible.\n"
             "Instala:\n"
-            "python-telegram-bot[job-queue]==22.2"
+            "python-telegram-bot"
+            "[job-queue]==22.2"
         )
 
     application.job_queue.run_repeating(
         ejecutar_analisis,
         interval=INTERVALO,
         first=5,
-        name="analizador_xau_v41"
+        name="analizador_xau_v42"
     )
 
     print(
-        "▶️ Primer análisis en 5 segundos"
+        "▶️ Primer análisis "
+        "en 5 segundos"
     )
 
     print(
