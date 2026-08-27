@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import time
 import uuid
+from datetime import datetime, timezone
 
 from ta.volatility import AverageTrueRange
 from ta.momentum import RSIIndicator
@@ -10,8 +11,9 @@ from ta.trend import ADXIndicator
 
 
 # ============================================================
-# XAU SNIPER AI V4.2
-# MOTOR DE ESTRUCTURA + MOMENTUM + LIQUIDEZ
+# XAU SNIPER AI V4.3
+# MOTOR:
+# ESTRUCTURA + MOVIMIENTO + MOMENTUM + LIQUIDEZ
 #
 # PROVEEDOR:
 # BiQuote
@@ -20,6 +22,7 @@ from ta.trend import ADXIndicator
 # PAPER / ESCÁNER
 #
 # FLUJO:
+#
 # ESTRUCTURA
 #     ↓
 # IMPULSO
@@ -31,8 +34,23 @@ from ta.trend import ADXIndicator
 # CONTINUACIÓN
 #     ↓
 # CONFIRMACIÓN
+#
+# CAMBIOS V4.3:
+#
+# 1. CONTROL DE FRESCURA DE DATOS
+# 2. DETECCIÓN DE PROVEEDOR CONGELADO
+# 3. DETECCIÓN DE REAPERTURA DE SESIÓN
+# 4. RETRIES DE BiQuote
+# 5. NO ANALIZAR VELAS OBSOLETAS
+# 6. MEJOR DETECCIÓN IMPULSO/PULLBACK
+# 7. MANTENER PREALERTAS Y CONFIRMACIONES
+# 8. MANTENER SCORE / ATR / RR / IDS
 # ============================================================
 
+
+# ============================================================
+# CONFIGURACIÓN BiQuote
+# ============================================================
 
 BIQUOTE_BASE = "https://biquote.io/api"
 
@@ -44,6 +62,65 @@ INTERVALO_15M = "15m"
 BARRAS_5M = 300
 BARRAS_15M = 200
 
+
+# ============================================================
+# CONFIGURACIÓN GENERAL
+# ============================================================
+
+TIMEOUT = 12
+
+# Número máximo de intentos contra BiQuote
+BIQUOTE_REINTENTOS = 3
+
+# Espera entre intentos
+BIQUOTE_ESPERA_REINTENTO = 2
+
+
+# ============================================================
+# FRESCURA DE DATOS
+#
+# Si la última vela cerrada tiene demasiada antigüedad,
+# NO debemos interpretar el mercado como si estuviera vivo.
+#
+# 5M:
+# Una vela normalmente debería aparecer cada 5 minutos.
+#
+# Permitimos cierto margen por retrasos normales de API.
+# ============================================================
+
+MAX_ANTIGUEDAD_5M_MIN = 12
+
+MAX_ANTIGUEDAD_15M_MIN = 25
+
+
+# ============================================================
+# SESIÓN
+#
+# El oro suele tener una pausa diaria.
+#
+# No queremos confundir:
+#
+# cierre diario
+#     ↓
+# hueco
+#     ↓
+# reapertura
+#
+# con:
+#
+# caída/impulso normal del mercado.
+# ============================================================
+
+DETECTAR_SALTO_SESION = True
+
+MAX_SALTO_NORMAL_5M_MIN = 10
+MAX_SALTO_NORMAL_15M_MIN = 25
+
+
+# ============================================================
+# INDICADORES
+# ============================================================
+
 ADX_MINIMO = 15
 
 RSI_COMPRA = 52
@@ -52,30 +129,51 @@ RSI_VENTA = 48
 RSI_CONFIRMACION_COMPRA = 54
 RSI_CONFIRMACION_VENTA = 46
 
+
+# ============================================================
+# SL / TP
+# ============================================================
+
 ATR_SL = 1.30
 ATR_TP = 2.20
 
 RR_MINIMO = 1.50
 
-# Tiempo máximo de vida de una prealerta
+
+# ============================================================
+# PREALERTA
+# ============================================================
+
 MINUTOS_PREALERTA = 15
 
-# Tiempo mínimo antes de permitir otra prealerta
 MINUTOS_REPETICION = 15
-
-# Para detectar retrocesos
-PULLBACK_MIN_ATR = 0.20
-PULLBACK_MAX_ATR = 1.80
-
-# Impulso mínimo
-IMPULSO_CUERPO_ATR = 0.40
-IMPULSO_RANGO_ATR = 0.70
-
-TIMEOUT = 12
 
 
 # ============================================================
-# ESTADO
+# PULLBACK
+# ============================================================
+
+PULLBACK_MIN_ATR = 0.20
+PULLBACK_MAX_ATR = 1.80
+
+
+# ============================================================
+# IMPULSO
+# ============================================================
+
+IMPULSO_CUERPO_ATR = 0.40
+IMPULSO_RANGO_ATR = 0.70
+
+
+# ============================================================
+# CONTINUACIÓN
+# ============================================================
+
+CONTINUACION_RANGO_ATR = 0.45
+
+
+# ============================================================
+# ESTADO GLOBAL
 # ============================================================
 
 estado_prealerta = None
@@ -86,8 +184,25 @@ ultima_alerta_timestamp = 0
 ultima_confirmacion_id = None
 ultima_confirmacion_timestamp = 0
 
+
+# ============================================================
+# CONTROL DE VELAS
+# ============================================================
+
 ultima_vela_5m = None
 ultima_vela_15m = None
+
+
+# ============================================================
+# CONTROL DE SESIÓN
+# ============================================================
+
+ultima_vela_real_5m = None
+ultima_vela_real_15m = None
+
+mercado_reabierto = False
+
+ultimo_estado_datos = None
 
 
 # ============================================================
@@ -97,7 +212,7 @@ ultima_vela_15m = None
 SESSION = requests.Session()
 
 SESSION.headers.update({
-    "User-Agent": "XAU-Sniper-AI/4.2"
+    "User-Agent": "XAU-Sniper-AI/4.3"
 })
 
 
@@ -106,34 +221,286 @@ SESSION.headers.update({
 # ============================================================
 
 def ahora_ms():
-    return int(time.time() * 1000)
+
+    return int(
+        time.time() * 1000
+    )
+
+
+def ahora_utc():
+
+    return datetime.now(
+        timezone.utc
+    )
 
 
 def limpiar_numero(valor):
 
     try:
+
         return float(valor)
 
     except Exception:
+
         return np.nan
 
 
 def numero_fmt(valor):
 
     try:
+
         return f"{float(valor):.2f}"
 
     except Exception:
+
         return "N/D"
 
 
 def precio_fmt(valor):
 
     try:
+
         return f"{float(valor):.2f}"
 
     except Exception:
+
         return "N/D"
+
+
+def timestamp_utc():
+
+    return ahora_utc().strftime(
+        "%Y-%m-%d %H:%M:%S UTC"
+    )
+
+
+# ============================================================
+# CONVERTIR FECHA A UTC
+# ============================================================
+
+def convertir_utc(valor):
+
+    try:
+
+        fecha = pd.to_datetime(
+            valor,
+            utc=True,
+            errors="coerce"
+        )
+
+        if pd.isna(fecha):
+
+            return None
+
+        return fecha
+
+    except Exception:
+
+        return None
+
+
+# ============================================================
+# ANTIGÜEDAD DE UNA VELA
+# ============================================================
+
+def antiguedad_minutos(fecha):
+
+    fecha = convertir_utc(fecha)
+
+    if fecha is None:
+
+        return float("inf")
+
+    ahora = pd.Timestamp.now(
+        tz="UTC"
+    )
+
+    diferencia = (
+        ahora - fecha
+    ).total_seconds() / 60
+
+    return max(
+        0,
+        diferencia
+    )
+
+
+# ============================================================
+# FRESCURA 5M
+# ============================================================
+
+def datos_5m_frescos(df):
+
+    if df is None or df.empty:
+
+        return False
+
+    ultima = df[
+        "openTime"
+    ].iloc[-1]
+
+    edad = antiguedad_minutos(
+        ultima
+    )
+
+    return (
+        edad <=
+        MAX_ANTIGUEDAD_5M_MIN
+    )
+
+
+# ============================================================
+# FRESCURA 15M
+# ============================================================
+
+def datos_15m_frescos(df):
+
+    if df is None or df.empty:
+
+        return False
+
+    ultima = df[
+        "openTime"
+    ].iloc[-1]
+
+    edad = antiguedad_minutos(
+        ultima
+    )
+
+    return (
+        edad <=
+        MAX_ANTIGUEDAD_15M_MIN
+    )
+
+
+# ============================================================
+# DESCRIPCIÓN DEL ESTADO DE DATOS
+# ============================================================
+
+def diagnosticar_frescura(
+    df5,
+    df15
+):
+
+    if df5 is None or df5.empty:
+
+        return {
+            "ok": False,
+            "motivo": "Sin datos 5M"
+        }
+
+    if df15 is None or df15.empty:
+
+        return {
+            "ok": False,
+            "motivo": "Sin datos 15M"
+        }
+
+    ultima5 = df5[
+        "openTime"
+    ].iloc[-1]
+
+    ultima15 = df15[
+        "openTime"
+    ].iloc[-1]
+
+    edad5 = antiguedad_minutos(
+        ultima5
+    )
+
+    edad15 = antiguedad_minutos(
+        ultima15
+    )
+
+    fresco5 = (
+        edad5 <=
+        MAX_ANTIGUEDAD_5M_MIN
+    )
+
+    fresco15 = (
+        edad15 <=
+        MAX_ANTIGUEDAD_15M_MIN
+    )
+
+    return {
+        "ok": (
+            fresco5
+            and fresco15
+        ),
+        "fresco5": fresco5,
+        "fresco15": fresco15,
+        "edad5": edad5,
+        "edad15": edad15,
+        "ultima5": ultima5,
+        "ultima15": ultima15
+    }
+
+
+# ============================================================
+# DETECTAR SALTO DE SESIÓN
+# ============================================================
+
+def detectar_salto_sesion(
+    df,
+    intervalo_minutos
+):
+
+    if df is None or len(df) < 2:
+
+        return False
+
+    t1 = convertir_utc(
+        df["openTime"].iloc[-2]
+    )
+
+    t2 = convertir_utc(
+        df["openTime"].iloc[-1]
+    )
+
+    if t1 is None or t2 is None:
+
+        return False
+
+    diferencia = (
+        t2 - t1
+    ).total_seconds() / 60
+
+    return (
+        diferencia >
+        intervalo_minutos * 2
+    )
+
+
+# ============================================================
+# ESTADO DE SESIÓN
+# ============================================================
+
+def evaluar_sesion(
+    df5,
+    df15
+):
+
+    salto5 = detectar_salto_sesion(
+        df5,
+        5
+    )
+
+    salto15 = detectar_salto_sesion(
+        df15,
+        15
+    )
+
+    return {
+        "salto_5m": salto5,
+        "salto_15m": salto15,
+        "reapertura_detectada":
+            salto5 or salto15
+    }
+
+
+# ============================================================
+# FIN PARTE 1
+# ============================================================
 
 
 # ============================================================
@@ -155,122 +522,241 @@ def obtener_ohlc(
         "limit": limite
     }
 
-    try:
+    ultimo_error = None
 
-        respuesta = SESSION.get(
-            url,
-            params=params,
-            timeout=TIMEOUT
-        )
+    for intento in range(
+        1,
+        BIQUOTE_REINTENTOS + 1
+    ):
 
-        respuesta.raise_for_status()
+        try:
 
-        data = respuesta.json()
+            respuesta = SESSION.get(
+                url,
+                params=params,
+                timeout=TIMEOUT
+            )
 
-    except requests.RequestException as e:
+            respuesta.raise_for_status()
 
-        raise RuntimeError(
-            f"BiQuote HTTP: {e}"
-        )
+            data = respuesta.json()
 
-    except ValueError:
+            if not isinstance(data, dict):
 
-        raise RuntimeError(
-            "BiQuote devolvió JSON inválido"
-        )
+                raise RuntimeError(
+                    "Respuesta BiQuote inesperada"
+                )
 
-    if not isinstance(data, dict):
+            barras = data.get("bars")
 
-        raise RuntimeError(
-            "Respuesta BiQuote inesperada"
-        )
+            if not barras:
 
-    barras = data.get("bars")
+                raise RuntimeError(
+                    f"BiQuote sin barras para "
+                    f"{intervalo}"
+                )
 
-    if not barras:
+            df = pd.DataFrame(barras)
 
-        raise RuntimeError(
-            f"BiQuote sin barras para {intervalo}"
-        )
+            columnas = [
+                "openTime",
+                "open",
+                "high",
+                "low",
+                "close"
+            ]
 
-    df = pd.DataFrame(barras)
+            faltantes = [
+                c
+                for c in columnas
+                if c not in df.columns
+            ]
 
-    columnas = [
-        "openTime",
-        "open",
-        "high",
-        "low",
-        "close"
-    ]
+            if faltantes:
 
-    faltantes = [
-        c
-        for c in columnas
-        if c not in df.columns
-    ]
+                raise RuntimeError(
+                    "Faltan columnas BiQuote: "
+                    + ", ".join(faltantes)
+                )
 
-    if faltantes:
+            for columna in [
+                "open",
+                "high",
+                "low",
+                "close"
+            ]:
 
-        raise RuntimeError(
-            "Faltan columnas BiQuote: "
-            + ", ".join(faltantes)
-        )
+                df[columna] = pd.to_numeric(
+                    df[columna],
+                    errors="coerce"
+                )
 
-    for columna in [
-        "open",
-        "high",
-        "low",
-        "close"
-    ]:
+            df["openTime"] = pd.to_datetime(
+                df["openTime"],
+                utc=True,
+                errors="coerce"
+            )
 
-        df[columna] = pd.to_numeric(
-            df[columna],
-            errors="coerce"
-        )
+            df = df.dropna(
+                subset=[
+                    "openTime",
+                    "open",
+                    "high",
+                    "low",
+                    "close"
+                ]
+            )
 
-    df["openTime"] = pd.to_datetime(
-        df["openTime"],
-        utc=True,
-        errors="coerce"
+            df = df.sort_values(
+                "openTime"
+            )
+
+            df = df.drop_duplicates(
+                subset=["openTime"]
+            )
+
+            # ------------------------------------------------
+            # NO USAR VELA ACTUALMENTE ABIERTA
+            # ------------------------------------------------
+
+            if "isOpen" in df.columns:
+
+                df = df[
+                    df["isOpen"] != True
+                ]
+
+            df = df.reset_index(
+                drop=True
+            )
+
+            if len(df) < 80:
+
+                raise RuntimeError(
+                    f"Datos insuficientes "
+                    f"{intervalo}: {len(df)}"
+                )
+
+            return df
+
+        except (
+            requests.RequestException,
+            ValueError,
+            RuntimeError
+        ) as e:
+
+            ultimo_error = e
+
+            print(
+                f"⚠️ BiQuote intento "
+                f"{intento}/"
+                f"{BIQUOTE_REINTENTOS}: "
+                f"{e}"
+            )
+
+            if intento < BIQUOTE_REINTENTOS:
+
+                time.sleep(
+                    BIQUOTE_ESPERA_REINTENTO
+                )
+
+    raise RuntimeError(
+        f"BiQuote falló después de "
+        f"{BIQUOTE_REINTENTOS} intentos: "
+        f"{ultimo_error}"
     )
 
-    df = df.dropna(
-        subset=[
-            "openTime",
-            "open",
-            "high",
-            "low",
-            "close"
-        ]
+
+# ============================================================
+# VALIDAR DATOS
+# ============================================================
+
+def validar_datos_mercado(
+    df5,
+    df15
+):
+
+    estado = diagnosticar_frescura(
+        df5,
+        df15
     )
 
-    df = df.sort_values(
-        "openTime"
-    )
+    if not estado["ok"]:
 
-    df = df.drop_duplicates(
-        subset=["openTime"]
-    )
-
-    # No usar vela actualmente abierta
-    if "isOpen" in df.columns:
-
-        df = df[
-            df["isOpen"] != True
-        ]
-
-    df = df.reset_index(
-        drop=True
-    )
-
-    if len(df) < 80:
-
-        raise RuntimeError(
-            f"Datos insuficientes "
-            f"{intervalo}: {len(df)}"
+        motivo = (
+            "Datos posiblemente congelados.\n"
+            f"5M: {estado.get('edad5', 0):.1f} min "
+            f"de antigüedad.\n"
+            f"15M: {estado.get('edad15', 0):.1f} min "
+            f"de antigüedad."
         )
 
-    return df
+        return False, motivo
+
+    return True, estado
+
+
+# ============================================================
+# DETECTAR DATOS REPETIDOS
+# ============================================================
+
+def detectar_velas_repetidas(
+    df5,
+    df15
+):
+
+    global ultima_vela_5m
+    global ultima_vela_15m
+
+    vela5 = str(
+        df5["openTime"].iloc[-1]
+    )
+
+    vela15 = str(
+        df15["openTime"].iloc[-1]
+    )
+
+    repetida5 = (
+        ultima_vela_5m == vela5
+    )
+
+    repetida15 = (
+        ultima_vela_15m == vela15
+    )
+
+    return {
+        "repetida5": repetida5,
+        "repetida15": repetida15,
+        "ambas_repetidas":
+            repetida5 and repetida15,
+        "vela5": vela5,
+        "vela15": vela15
+    }
+
+
+# ============================================================
+# ACTUALIZAR CONTROL DE VELAS
+# ============================================================
+
+def actualizar_control_velas(
+    df5,
+    df15
+):
+
+    global ultima_vela_5m
+    global ultima_vela_15m
+
+    ultima_vela_5m = str(
+        df5["openTime"].iloc[-1]
+    )
+
+    ultima_vela_15m = str(
+        df15["openTime"].iloc[-1]
+    )
+
+
+# ============================================================
+# FIN PARTE 2
+# ============================================================
 
 
 # ============================================================
@@ -307,6 +793,46 @@ def agregar_indicadores(df):
     df["adx"] = adx.adx()
     df["di_plus"] = adx.adx_pos()
     df["di_minus"] = adx.adx_neg()
+
+    # --------------------------------------------------------
+    # VELOCIDAD DEL PRECIO
+    # --------------------------------------------------------
+
+    df["cuerpo"] = (
+        df["close"] -
+        df["open"]
+    ).abs()
+
+    df["rango"] = (
+        df["high"] -
+        df["low"]
+    )
+
+    df["direccion"] = np.where(
+        df["close"] > df["open"],
+        1,
+        np.where(
+            df["close"] < df["open"],
+            -1,
+            0
+        )
+    )
+
+    # --------------------------------------------------------
+    # FUERZA RELATIVA DE LA VELA
+    # --------------------------------------------------------
+
+    df["cuerpo_atr"] = np.where(
+        df["atr"] > 0,
+        df["cuerpo"] / df["atr"],
+        0
+    )
+
+    df["rango_atr"] = np.where(
+        df["atr"] > 0,
+        df["rango"] / df["atr"],
+        0
+    )
 
     df = df.replace(
         [np.inf, -np.inf],
@@ -444,15 +970,21 @@ def evaluar_estructura(df):
 
     h1 = highs[-1]
     h2 = highs[-2]
+    h3 = highs[-3]
 
     l1 = lows[-1]
     l2 = lows[-2]
+    l3 = lows[-3]
 
     hh = h1 > h2
     hl = l1 > l2
 
     lh = h1 < h2
     ll = l1 < l2
+
+    # --------------------------------------------------------
+    # ESTRUCTURA
+    # --------------------------------------------------------
 
     regimen = "LATERAL"
     estructura = "MIXTA"
@@ -481,16 +1013,23 @@ def evaluar_estructura(df):
         df["close"].iloc[-1]
     )
 
-    swing_high = h1
-    swing_low = l1
+    # --------------------------------------------------------
+    # BOS
+    # --------------------------------------------------------
 
     bos_alcista = (
         cierre > h2
+        and h2 >= h3
     )
 
     bos_bajista = (
         cierre < l2
+        and l2 <= l3
     )
+
+    # --------------------------------------------------------
+    # CHoCH
+    # --------------------------------------------------------
 
     choch_alcista = (
         regimen == "TRANSICION"
@@ -509,13 +1048,18 @@ def evaluar_estructura(df):
         "bos_bajista": bos_bajista,
         "choch_alcista": choch_alcista,
         "choch_bajista": choch_bajista,
-        "swing_high": swing_high,
-        "swing_low": swing_low,
+        "swing_high": h1,
+        "swing_low": l1,
         "hh": hh,
         "hl": hl,
         "lh": lh,
         "ll": ll
     }
+
+
+# ============================================================
+# FIN PARTE 3
+# ============================================================
 
 
 # ============================================================
@@ -526,14 +1070,33 @@ def evaluar_momentum(df):
 
     ult = df.iloc[-1]
 
-    cierre = float(ult["close"])
-    apertura = float(ult["open"])
-    high = float(ult["high"])
-    low = float(ult["low"])
+    cierre = float(
+        ult["close"]
+    )
 
-    atr = float(ult["atr"])
-    rsi = float(ult["rsi"])
-    adx = float(ult["adx"])
+    apertura = float(
+        ult["open"]
+    )
+
+    high = float(
+        ult["high"]
+    )
+
+    low = float(
+        ult["low"]
+    )
+
+    atr = float(
+        ult["atr"]
+    )
+
+    rsi = float(
+        ult["rsi"]
+    )
+
+    adx = float(
+        ult["adx"]
+    )
 
     di_plus = float(
         ult["di_plus"]
@@ -560,15 +1123,19 @@ def evaluar_momentum(df):
     impulso_alcista = (
         vela_alcista
         and atr > 0
-        and cuerpo >= atr * IMPULSO_CUERPO_ATR
-        and rango >= atr * IMPULSO_RANGO_ATR
+        and cuerpo >=
+        atr * IMPULSO_CUERPO_ATR
+        and rango >=
+        atr * IMPULSO_RANGO_ATR
     )
 
     impulso_bajista = (
         vela_bajista
         and atr > 0
-        and cuerpo >= atr * IMPULSO_CUERPO_ATR
-        and rango >= atr * IMPULSO_RANGO_ATR
+        and cuerpo >=
+        atr * IMPULSO_CUERPO_ATR
+        and rango >=
+        atr * IMPULSO_RANGO_ATR
     )
 
     momentum_alcista = (
@@ -592,11 +1159,61 @@ def evaluar_momentum(df):
         "rango": rango,
         "vela_alcista": vela_alcista,
         "vela_bajista": vela_bajista,
-        "impulso_alcista": impulso_alcista,
-        "impulso_bajista": impulso_bajista,
-        "momentum_alcista": momentum_alcista,
-        "momentum_bajista": momentum_bajista
+        "impulso_alcista":
+            impulso_alcista,
+        "impulso_bajista":
+            impulso_bajista,
+        "momentum_alcista":
+            momentum_alcista,
+        "momentum_bajista":
+            momentum_bajista
     }
+
+
+# ============================================================
+# IMPULSO RECIENTE
+# ============================================================
+
+def detectar_impulso_reciente(
+    df,
+    direccion
+):
+
+    recientes = df.tail(6).copy()
+
+    if len(recientes) < 3:
+
+        return False
+
+    if direccion == "COMPRA":
+
+        condiciones = (
+            (recientes["close"] >
+             recientes["open"])
+            &
+            (recientes["cuerpo"] >=
+             recientes["atr"] * 0.40)
+            &
+            (recientes["rango"] >=
+             recientes["atr"] * 0.70)
+        )
+
+    else:
+
+        condiciones = (
+            (recientes["close"] <
+             recientes["open"])
+            &
+            (recientes["cuerpo"] >=
+             recientes["atr"] * 0.40)
+            &
+            (recientes["rango"] >=
+             recientes["atr"] * 0.70)
+        )
+
+    return bool(
+        condiciones.any()
+    )
 
 
 # ============================================================
@@ -623,50 +1240,23 @@ def detectar_pullback(
             "retroceso_venta": False
         }
 
-    # --------------------------------------------------------
-    # Miramos las últimas velas cerradas.
-    # Buscamos evidencia de impulso reciente.
-    # --------------------------------------------------------
-
-    recientes = df.tail(6).copy()
-
-    cuerpos = (
-        recientes["close"]
-        - recientes["open"]
-    ).abs()
-
-    rangos = (
-        recientes["high"]
-        - recientes["low"]
+    impulso_previo_compra = (
+        detectar_impulso_reciente(
+            df,
+            "COMPRA"
+        )
     )
 
-    alcistas = (
-        recientes["close"]
-        > recientes["open"]
+    impulso_previo_venta = (
+        detectar_impulso_reciente(
+            df,
+            "VENTA"
+        )
     )
 
-    bajistas = (
-        recientes["close"]
-        < recientes["open"]
+    highs, lows = ultimos_pivots(
+        df
     )
-
-    impulso_previo_compra = bool(
-        (
-            alcistas
-            & (cuerpos >= recientes["atr"] * 0.40)
-            & (rangos >= recientes["atr"] * 0.70)
-        ).any()
-    )
-
-    impulso_previo_venta = bool(
-        (
-            bajistas
-            & (cuerpos >= recientes["atr"] * 0.40)
-            & (rangos >= recientes["atr"] * 0.70)
-        ).any()
-    )
-
-    highs, lows = ultimos_pivots(df)
 
     if not highs or not lows:
 
@@ -697,11 +1287,26 @@ def detectar_pullback(
     # --------------------------------------------------------
 
     retroceso_compra = (
-        estructura["regimen"] == "ALCISTA"
-        and impulso_previo_compra
-        and distancia_low >= atr * PULLBACK_MIN_ATR
-        and distancia_low <= atr * PULLBACK_MAX_ATR
-        and precio >= swing_low
+        estructura["regimen"]
+        == "ALCISTA"
+
+        and
+
+        impulso_previo_compra
+
+        and
+
+        distancia_low >=
+        atr * PULLBACK_MIN_ATR
+
+        and
+
+        distancia_low <=
+        atr * PULLBACK_MAX_ATR
+
+        and
+
+        precio >= swing_low
     )
 
     # --------------------------------------------------------
@@ -709,11 +1314,26 @@ def detectar_pullback(
     # --------------------------------------------------------
 
     retroceso_venta = (
-        estructura["regimen"] == "BAJISTA"
-        and impulso_previo_venta
-        and distancia_high >= atr * PULLBACK_MIN_ATR
-        and distancia_high <= atr * PULLBACK_MAX_ATR
-        and precio <= swing_high
+        estructura["regimen"]
+        == "BAJISTA"
+
+        and
+
+        impulso_previo_venta
+
+        and
+
+        distancia_high >=
+        atr * PULLBACK_MIN_ATR
+
+        and
+
+        distancia_high <=
+        atr * PULLBACK_MAX_ATR
+
+        and
+
+        precio <= swing_high
     )
 
     return {
@@ -735,6 +1355,11 @@ def detectar_pullback(
         "retroceso_venta":
             retroceso_venta
     }
+
+
+# ============================================================
+# FIN PARTE 4
+# ============================================================
 
 
 # ============================================================
@@ -780,13 +1405,15 @@ def detectar_continuacion(
     continuacion_compra = (
         close > prev_high
         and close > open_
-        and rango >= atr * 0.45
+        and rango >=
+        atr * CONTINUACION_RANGO_ATR
     )
 
     continuacion_venta = (
         close < prev_low
         and close < open_
-        and rango >= atr * 0.45
+        and rango >=
+        atr * CONTINUACION_RANGO_ATR
     )
 
     return {
@@ -799,6 +1426,54 @@ def detectar_continuacion(
 
 
 # ============================================================
+# LIQUIDEZ / EXTREMOS
+# ============================================================
+
+def evaluar_liquidez(df):
+
+    if len(df) < 10:
+
+        return {
+            "liquidez_alta": None,
+            "liquidez_baja": None,
+            "distancia_alta": None,
+            "distancia_baja": None
+        }
+
+    ultimas = df.tail(20)
+
+    liquidez_alta = float(
+        ultimas["high"].max()
+    )
+
+    liquidez_baja = float(
+        ultimas["low"].min()
+    )
+
+    precio = float(
+        df["close"].iloc[-1]
+    )
+
+    return {
+        "liquidez_alta":
+            liquidez_alta,
+
+        "liquidez_baja":
+            liquidez_baja,
+
+        "distancia_alta":
+            abs(
+                liquidez_alta - precio
+            ),
+
+        "distancia_baja":
+            abs(
+                precio - liquidez_baja
+            )
+    }
+
+
+# ============================================================
 # SCORE COMPRA
 # ============================================================
 
@@ -806,7 +1481,8 @@ def calcular_score_compra(
     estructura,
     momentum,
     pullback,
-    continuacion
+    continuacion,
+    liquidez=None
 ):
 
     score = 0
@@ -861,14 +1537,19 @@ def calcular_score_compra(
             "pullback válido"
         )
 
-    if continuacion["continuacion_compra"]:
+    if continuacion[
+        "continuacion_compra"
+    ]:
 
         score += 15
         razones.append(
             "continuación confirmada"
         )
 
-    return min(score, 100), razones
+    return min(
+        score,
+        100
+    ), razones
 
 
 # ============================================================
@@ -879,7 +1560,8 @@ def calcular_score_venta(
     estructura,
     momentum,
     pullback,
-    continuacion
+    continuacion,
+    liquidez=None
 ):
 
     score = 0
@@ -934,14 +1616,24 @@ def calcular_score_venta(
             "pullback válido"
         )
 
-    if continuacion["continuacion_venta"]:
+    if continuacion[
+        "continuacion_venta"
+    ]:
 
         score += 15
         razones.append(
             "continuación confirmada"
         )
 
-    return min(score, 100), razones
+    return min(
+        score,
+        100
+    ), razones
+
+
+# ============================================================
+# FIN PARTE 5
+# ============================================================
 
 
 # ============================================================
@@ -1050,7 +1742,8 @@ def cooldown_activo():
 
     return (
         transcurrido
-        < MINUTOS_REPETICION * 60
+        <
+        MINUTOS_REPETICION * 60
     )
 
 
@@ -1090,7 +1783,9 @@ def guardar_prealerta(
 
     ultima_alerta_id = identificador
 
-    ultima_alerta_timestamp = time.time()
+    ultima_alerta_timestamp = (
+        time.time()
+    )
 
     return identificador
 
@@ -1109,10 +1804,13 @@ def prealerta_vigente():
 
     edad = (
         time.time()
-        - estado_prealerta["timestamp"]
+        -
+        estado_prealerta["timestamp"]
     )
 
-    if edad > MINUTOS_PREALERTA * 60:
+    if edad > (
+        MINUTOS_PREALERTA * 60
+    ):
 
         return False
 
@@ -1142,7 +1840,7 @@ def expirar_prealerta():
         "tipo": "DESCARTADA",
         "id": anterior["id"],
         "mensaje": (
-            "🟠 XAU SNIPER AI V4.2\n\n"
+            "🟠 XAU SNIPER AI V4.3\n\n"
             "⏰ PREALERTA EXPIRADA\n\n"
             f"📌 Dirección: "
             f"{anterior['direccion']}\n"
@@ -1184,7 +1882,7 @@ def descartar_prealerta(
         "tipo": "DESCARTADA",
         "id": anterior["id"],
         "mensaje": (
-            "🟠 XAU SNIPER AI V4.2\n\n"
+            "🟠 XAU SNIPER AI V4.3\n\n"
             "❌ PREALERTA DESCARTADA\n\n"
             f"📌 Dirección: "
             f"{anterior['direccion']}\n"
@@ -1197,6 +1895,11 @@ def descartar_prealerta(
             "🔍 Setup invalidado."
         )
     }
+
+
+# ============================================================
+# FIN PARTE 6
+# ============================================================
 
 
 # ============================================================
@@ -1216,17 +1919,15 @@ def confirmar_prealerta(
 
         return None
 
-    # --------------------------------------------------------
-    # IMPORTANTE:
-    # Primero comprobamos EXPIRACIÓN.
-    # --------------------------------------------------------
-
     edad = (
         time.time()
-        - estado_prealerta["timestamp"]
+        -
+        estado_prealerta["timestamp"]
     )
 
-    if edad > MINUTOS_PREALERTA * 60:
+    if edad > (
+        MINUTOS_PREALERTA * 60
+    ):
 
         return expirar_prealerta()
 
@@ -1248,9 +1949,11 @@ def confirmar_prealerta(
             estructura5["regimen"]
             == "BAJISTA"
             or
-            precio < (
+            precio <
+            (
                 p["precio"]
-                - p["atr"] * 0.80
+                -
+                p["atr"] * 0.80
             )
         )
 
@@ -1282,7 +1985,8 @@ def confirmar_prealerta(
 
             and
 
-            rsi >= RSI_CONFIRMACION_COMPRA
+            rsi >=
+            RSI_CONFIRMACION_COMPRA
 
             and
 
@@ -1300,6 +2004,7 @@ def confirmar_prealerta(
         motivos = []
 
         if estructura5["regimen"] != "ALCISTA":
+
             motivos.append(
                 "5M aún no está alcista"
             )
@@ -1308,6 +2013,7 @@ def confirmar_prealerta(
             "ALCISTA",
             "TRANSICION"
         ]:
+
             motivos.append(
                 "15M no acompaña"
             )
@@ -1315,31 +2021,41 @@ def confirmar_prealerta(
         if not continuacion5[
             "continuacion_compra"
         ]:
+
             motivos.append(
                 "falta continuación"
             )
 
         if rsi < RSI_CONFIRMACION_COMPRA:
+
             motivos.append(
                 "RSI aún no confirma"
             )
 
         if adx < ADX_MINIMO:
+
             motivos.append(
                 "ADX insuficiente"
+            )
+
+        if not motivos:
+
+            motivos.append(
+                "condiciones aún incompletas"
             )
 
         return {
             "tipo": "ESPERANDO",
             "id": p["id"],
             "mensaje": (
-                "⏳ XAU SNIPER AI V4.2\n\n"
+                "⏳ XAU SNIPER AI V4.3\n\n"
                 "⚠️ PREALERTA ACTIVA\n\n"
                 f"🆔 ID: {p['id']}\n"
                 "🟢 Dirección: COMPRA\n\n"
                 "🔍 Todavía NO confirmada.\n\n"
                 "Falta:\n"
-                + "\n".join(
+                +
+                "\n".join(
                     f"• {m}"
                     for m in motivos
                 )
@@ -1354,9 +2070,11 @@ def confirmar_prealerta(
         estructura5["regimen"]
         == "ALCISTA"
         or
-        precio > (
+        precio >
+        (
             p["precio"]
-            + p["atr"] * 0.80
+            +
+            p["atr"] * 0.80
         )
     )
 
@@ -1388,7 +2106,8 @@ def confirmar_prealerta(
 
         and
 
-        rsi <= RSI_CONFIRMACION_VENTA
+        rsi <=
+        RSI_CONFIRMACION_VENTA
 
         and
 
@@ -1406,6 +2125,7 @@ def confirmar_prealerta(
     motivos = []
 
     if estructura5["regimen"] != "BAJISTA":
+
         motivos.append(
             "5M aún no está bajista"
         )
@@ -1414,6 +2134,7 @@ def confirmar_prealerta(
         "BAJISTA",
         "TRANSICION"
     ]:
+
         motivos.append(
             "15M no acompaña"
         )
@@ -1421,31 +2142,41 @@ def confirmar_prealerta(
     if not continuacion5[
         "continuacion_venta"
     ]:
+
         motivos.append(
             "falta continuación"
         )
 
     if rsi > RSI_CONFIRMACION_VENTA:
+
         motivos.append(
             "RSI aún no confirma"
         )
 
     if adx < ADX_MINIMO:
+
         motivos.append(
             "ADX insuficiente"
+        )
+
+    if not motivos:
+
+        motivos.append(
+            "condiciones aún incompletas"
         )
 
     return {
         "tipo": "ESPERANDO",
         "id": p["id"],
         "mensaje": (
-            "⏳ XAU SNIPER AI V4.2\n\n"
+            "⏳ XAU SNIPER AI V4.3\n\n"
             "⚠️ PREALERTA ACTIVA\n\n"
             f"🆔 ID: {p['id']}\n"
             "🔴 Dirección: VENTA\n\n"
             "🔍 Todavía NO confirmada.\n\n"
             "Falta:\n"
-            + "\n".join(
+            +
+            "\n".join(
                 f"• {m}"
                 for m in motivos
             )
@@ -1477,11 +2208,12 @@ def construir_prealerta(
     )
 
     return (
-        f"{emoji} XAU SNIPER AI V4.2\n\n"
+        f"{emoji} XAU SNIPER AI V4.3\n\n"
         f"⚠️ PREALERTA {direccion}\n\n"
         f"🆔 ID: {identificador}\n"
         f"📊 Score: {score}/100\n"
-        f"💰 Precio: {precio_fmt(precio)}\n\n"
+        f"💰 Precio: "
+        f"{precio_fmt(precio)}\n\n"
         f"📈 5M: "
         f"{estructura5['regimen']}\n"
         f"📊 15M: "
@@ -1504,6 +2236,11 @@ def construir_prealerta(
         "🔄 Esperando continuación.\n\n"
         "⚠️ AÚN NO CONFIRMADA"
     )
+
+
+# ============================================================
+# FIN PARTE 7
+# ============================================================
 
 
 # ============================================================
@@ -1530,7 +2267,7 @@ def construir_confirmacion(
     )
 
     return (
-        f"{emoji} XAU SNIPER AI V4.2\n\n"
+        f"{emoji} XAU SNIPER AI V4.3\n\n"
         f"🔥 ALERTA CONFIRMADA: "
         f"{direccion}\n\n"
         f"🆔 ID: {identificador}\n"
@@ -1571,13 +2308,18 @@ def construir_diagnostico(
     pullback5,
     continuacion5,
     score_compra,
-    score_venta
+    score_venta,
+    liquidez=None
 ):
 
-    return (
+    mensaje = (
         "📋 DIAGNÓSTICO XAU SNIPER\n\n"
-        f"5M: {estructura5['regimen']}\n"
-        f"15M: {estructura15['regimen']}\n\n"
+
+        f"5M: "
+        f"{estructura5['regimen']}\n"
+
+        f"15M: "
+        f"{estructura15['regimen']}\n\n"
 
         f"RSI: "
         f"{numero_fmt(momentum5['rsi'])}\n"
@@ -1616,6 +2358,22 @@ def construir_diagnostico(
         f"{continuacion5['continuacion_venta']}"
     )
 
+    if liquidez is not None:
+
+        mensaje += (
+            "\n\n💧 LIQUIDEZ\n"
+            f"Alta: "
+            f"{precio_fmt("
+                liquidez['liquidez_alta']
+            )}\n"
+            f"Baja: "
+            f"{precio_fmt("
+                liquidez['liquidez_baja']
+            )}"
+        )
+
+    return mensaje
+
 
 # ============================================================
 # ERROR
@@ -1628,13 +2386,59 @@ def construir_error(
     return {
         "tipo": "ERROR",
         "mensaje": (
-            "❌ XAU SNIPER AI V4.2\n\n"
+            "❌ XAU SNIPER AI V4.3\n\n"
             "⚠️ Error de datos / motor\n\n"
             f"{mensaje}\n\n"
             "📡 Proveedor: BiQuote\n"
             "🛑 El bot continúa ejecutándose."
         )
     }
+
+
+# ============================================================
+# ESTADO DE DATOS
+# ============================================================
+
+def construir_estado_datos(
+    df5,
+    df15
+):
+
+    estado = diagnosticar_frescura(
+        df5,
+        df15
+    )
+
+    if not estado["ok"]:
+
+        return {
+            "ok": False,
+            "mensaje": (
+                "🚨 DATOS NO FRESCOS\n\n"
+                f"5M: "
+                f"{estado.get('edad5', 0):.1f} min\n"
+                f"15M: "
+                f"{estado.get('edad15', 0):.1f} min\n\n"
+                "⛔ No se generarán señales "
+                "con datos atrasados."
+            )
+        }
+
+    return {
+        "ok": True,
+        "mensaje": (
+            "✅ DATOS FRESCOS\n"
+            f"5M: "
+            f"{estado['edad5']:.1f} min\n"
+            f"15M: "
+            f"{estado['edad15']:.1f} min"
+        )
+    }
+
+
+# ============================================================
+# FIN PARTE 8
+# ============================================================
 
 
 # ============================================================
@@ -1648,8 +2452,28 @@ def analizar():
     global ultima_confirmacion_timestamp
     global ultima_vela_5m
     global ultima_vela_15m
+    global ultima_vela_real_5m
+    global ultima_vela_real_15m
+    global mercado_reabierto
+    global ultimo_estado_datos
 
     try:
+
+        print(
+            "==================================="
+        )
+
+        print(
+            "🔍 ANALIZANDO XAU/USD..."
+        )
+
+        print(
+            "==================================="
+        )
+
+        # ====================================================
+        # DESCARGA
+        # ====================================================
 
         print(
             "📡 Descargando datos desde BiQuote..."
@@ -1675,9 +2499,9 @@ def analizar():
             f"{len(df15)} velas"
         )
 
-        # ----------------------------------------------------
-        # ÚLTIMA VELA
-        # ----------------------------------------------------
+        # ====================================================
+        # ÚLTIMAS VELAS
+        # ====================================================
 
         vela5 = str(
             df5["openTime"].iloc[-1]
@@ -1688,43 +2512,177 @@ def analizar():
         )
 
         print(
-            f"🕐 Última vela 5M: {vela5}"
+            f"🕐 Última vela 5M: "
+            f"{vela5}"
         )
 
         print(
-            f"🕐 Última vela 15M: {vela15}"
+            f"🕐 Última vela 15M: "
+            f"{vela15}"
         )
 
-        if (
-            ultima_vela_5m == vela5
-            and ultima_vela_15m == vela15
+        # ====================================================
+        # FRESCURA
+        # ====================================================
+
+        estado_datos = construir_estado_datos(
+            df5,
+            df15
+        )
+
+        print(
+            estado_datos["mensaje"]
+        )
+
+        # ----------------------------------------------------
+        # SI BIQUOTE ESTÁ ATRASADO
+        # ----------------------------------------------------
+
+        if not estado_datos["ok"]:
+
+            ultimo_estado_datos = (
+                "ATRASADO"
+            )
+
+            # Si había una prealerta, no dejamos
+            # que sobreviva artificialmente durante
+            # una interrupción de datos.
+
+            if estado_prealerta is not None:
+
+                return descartar_prealerta(
+                    "BiQuote está devolviendo "
+                    "datos atrasados. "
+                    "La prealerta queda "
+                    "invalidada hasta recibir "
+                    "datos frescos."
+                )
+
+            return {
+                "tipo": "SIN_SEÑAL",
+                "mensaje": (
+                    "🚨 DATOS ATRASADOS\n\n"
+                    "BiQuote no está entregando "
+                    "velas suficientemente "
+                    "recientes.\n\n"
+                    "⛔ No se genera señal."
+                )
+            }
+
+        ultimo_estado_datos = (
+            "FRESCO"
+        )
+
+        # ====================================================
+        # REPETICIÓN DE VELAS
+        # ====================================================
+
+        repetidas = detectar_velas_repetidas(
+            df5,
+            df15
+        )
+
+        if repetidas["ambas_repetidas"]:
+
+            print(
+                "ℹ️ Las últimas velas son "
+                "las mismas del análisis "
+                "anterior."
+            )
+
+            print(
+                "🟢 Datos siguen siendo frescos."
+            )
+
+        elif (
+            repetidas["repetida5"]
+            or
+            repetidas["repetida15"]
         ):
 
             print(
-                "ℹ️ No hay velas nuevas "
-                "desde el análisis anterior."
+                "ℹ️ Una temporalidad "
+                "todavía no tiene vela nueva."
             )
 
-        ultima_vela_5m = vela5
-        ultima_vela_15m = vela15
+        else:
 
-        # ----------------------------------------------------
+            print(
+                "🆕 Hay nuevas velas "
+                "cerradas."
+            )
+
+        # ====================================================
+        # DETECTAR REAPERTURA
+        # ====================================================
+
+        sesion = evaluar_sesion(
+            df5,
+            df15
+        )
+
+        if sesion[
+            "reapertura_detectada"
+        ]:
+
+            mercado_reabierto = True
+
+            print(
+                "🔓 POSIBLE REAPERTURA "
+                "DE SESIÓN DETECTADA"
+            )
+
+            print(
+                "🧹 Reiniciando referencia "
+                "de velas."
+            )
+
+            ultima_vela_real_5m = None
+            ultima_vela_real_15m = None
+
+        else:
+
+            mercado_reabierto = False
+
+        # ====================================================
+        # ACTUALIZAR CONTROL
+        # ====================================================
+
+        actualizar_control_velas(
+            df5,
+            df15
+        )
+
+        ultima_vela_real_5m = vela5
+        ultima_vela_real_15m = vela15
+
+        # ====================================================
         # INDICADORES
-        # ----------------------------------------------------
+        # ====================================================
 
-        df5 = agregar_indicadores(df5)
-        df15 = agregar_indicadores(df15)
+        df5 = agregar_indicadores(
+            df5
+        )
 
-        # ----------------------------------------------------
+        df15 = agregar_indicadores(
+            df15
+        )
+
+        # ====================================================
         # PIVOTS
-        # ----------------------------------------------------
+        # ====================================================
 
-        df5 = detectar_pivots(df5)
-        df15 = detectar_pivots(df15)
+        df5 = detectar_pivots(
+            df5
+        )
 
-        # ----------------------------------------------------
+        df15 = detectar_pivots(
+            df15
+        )
+
+        # ====================================================
         # ESTRUCTURA
-        # ----------------------------------------------------
+        # ====================================================
 
         estructura5 = evaluar_estructura(
             df5
@@ -1734,17 +2692,17 @@ def analizar():
             df15
         )
 
-        # ----------------------------------------------------
+        # ====================================================
         # MOMENTUM
-        # ----------------------------------------------------
+        # ====================================================
 
         momentum5 = evaluar_momentum(
             df5
         )
 
-        # ----------------------------------------------------
+        # ====================================================
         # PULLBACK
-        # ----------------------------------------------------
+        # ====================================================
 
         pullback5 = detectar_pullback(
             df5,
@@ -1752,14 +2710,26 @@ def analizar():
             momentum5
         )
 
-        # ----------------------------------------------------
+        # ====================================================
         # CONTINUACIÓN
-        # ----------------------------------------------------
+        # ====================================================
 
         continuacion5 = detectar_continuacion(
             df5,
             momentum5
         )
+
+        # ====================================================
+        # LIQUIDEZ
+        # ====================================================
+
+        liquidez5 = evaluar_liquidez(
+            df5
+        )
+
+        # ====================================================
+        # LOG
+        # ====================================================
 
         print(
             f"📊 5M: "
@@ -1786,6 +2756,36 @@ def analizar():
             f"{momentum5['adx']:.2f}"
         )
 
+        print(
+            f"DI+: "
+            f"{momentum5['di_plus']:.2f}"
+        )
+
+        print(
+            f"DI-: "
+            f"{momentum5['di_minus']:.2f}"
+        )
+
+        print(
+            f"💥 Impulso compra: "
+            f"{momentum5['impulso_alcista']}"
+        )
+
+        print(
+            f"💥 Impulso venta: "
+            f"{momentum5['impulso_bajista']}"
+        )
+
+        print(
+            f"🚀 Continuación compra: "
+            f"{continuacion5['continuacion_compra']}"
+        )
+
+        print(
+            f"🚀 Continuación venta: "
+            f"{continuacion5['continuacion_venta']}"
+        )
+
         # ====================================================
         # SCORE
         # ====================================================
@@ -1795,7 +2795,8 @@ def analizar():
                 estructura5,
                 momentum5,
                 pullback5,
-                continuacion5
+                continuacion5,
+                liquidez5
             )
         )
 
@@ -1804,7 +2805,8 @@ def analizar():
                 estructura5,
                 momentum5,
                 pullback5,
-                continuacion5
+                continuacion5,
+                liquidez5
             )
         )
 
@@ -1868,7 +2870,8 @@ def analizar():
                             estructura5,
                             momentum5,
                             pullback5,
-                            continuacion5
+                            continuacion5,
+                            liquidez5
                         )
                     )
 
@@ -1879,7 +2882,8 @@ def analizar():
                             estructura5,
                             momentum5,
                             pullback5,
-                            continuacion5
+                            continuacion5,
+                            liquidez5
                         )
                     )
 
@@ -1948,18 +2952,10 @@ def analizar():
                 "mensaje": (
                     "🧊 Cooldown activo."
                 )
-                }
-
+            }
 
         # ====================================================
-        # SETUP DE PREALERTA
-        #
-        # AQUÍ ESTÁ EL CAMBIO IMPORTANTE:
-        #
-        # Ya NO exigimos momentum completo para crear
-        # una prealerta.
-        #
-        # El momentum fuerte queda para CONFIRMACIÓN.
+        # SETUPS
         # ====================================================
 
         setup_compra = (
@@ -1981,7 +2977,9 @@ def analizar():
 
             and
 
-            pullback5["pullback_compra"]
+            pullback5[
+                "pullback_compra"
+            ]
         )
 
         setup_venta = (
@@ -2003,8 +3001,32 @@ def analizar():
 
             and
 
-            pullback5["pullback_venta"]
+            pullback5[
+                "pullback_venta"
+            ]
         )
+
+        # ====================================================
+        # EVITAR CONFLICTO DE DIRECCIONES
+        # ====================================================
+
+        if (
+            setup_compra
+            and setup_venta
+        ):
+
+            print(
+                "⚠️ Setup ambiguo: "
+                "compra y venta simultáneas."
+            )
+
+            return {
+                "tipo": "SIN_SEÑAL",
+                "mensaje": (
+                    "😴 SIN_SEÑAL\n\n"
+                    "⚠️ Estructura ambigua."
+                )
+            }
 
         # ====================================================
         # PREALERTA COMPRA
@@ -2012,13 +3034,19 @@ def analizar():
 
         if (
             setup_compra
-            and score_compra >= 50
+            and
+            score_compra >= 50
         ):
 
             direccion = "COMPRA"
 
-            precio = momentum5["precio"]
-            atr = momentum5["atr"]
+            precio = momentum5[
+                "precio"
+            ]
+
+            atr = momentum5[
+                "atr"
+            ]
 
             sl, tp, rr = calcular_niveles(
                 direccion,
@@ -2041,13 +3069,15 @@ def analizar():
                     )
                 }
 
-            identificador = guardar_prealerta(
-                direccion,
-                precio,
-                atr,
-                score_compra,
-                estructura5,
-                momentum5
+            identificador = (
+                guardar_prealerta(
+                    direccion,
+                    precio,
+                    atr,
+                    score_compra,
+                    estructura5,
+                    momentum5
+                )
             )
 
             mensaje = construir_prealerta(
@@ -2079,13 +3109,19 @@ def analizar():
 
         if (
             setup_venta
-            and score_venta >= 50
+            and
+            score_venta >= 50
         ):
 
             direccion = "VENTA"
 
-            precio = momentum5["precio"]
-            atr = momentum5["atr"]
+            precio = momentum5[
+                "precio"
+            ]
+
+            atr = momentum5[
+                "atr"
+            ]
 
             sl, tp, rr = calcular_niveles(
                 direccion,
@@ -2108,13 +3144,15 @@ def analizar():
                     )
                 }
 
-            identificador = guardar_prealerta(
-                direccion,
-                precio,
-                atr,
-                score_venta,
-                estructura5,
-                momentum5
+            identificador = (
+                guardar_prealerta(
+                    direccion,
+                    precio,
+                    atr,
+                    score_venta,
+                    estructura5,
+                    momentum5
+                )
             )
 
             mensaje = construir_prealerta(
@@ -2141,7 +3179,7 @@ def analizar():
             }
 
         # ====================================================
-        # SIN SEÑAL
+        # DIAGNÓSTICO
         # ====================================================
 
         diagnostico = construir_diagnostico(
@@ -2151,10 +3189,13 @@ def analizar():
             pullback5,
             continuacion5,
             score_compra,
-            score_venta
+            score_venta,
+            liquidez5
         )
 
-        print(diagnostico)
+        print(
+            diagnostico
+        )
 
         return {
             "tipo": "SIN_SEÑAL",
@@ -2197,5 +3238,5 @@ def analizar():
 
 
 # ============================================================
-# FIN XAU SNIPER AI V4.2
+# FIN XAU SNIPER AI V4.3
 # ============================================================
