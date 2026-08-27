@@ -100,7 +100,7 @@ async def botones(
                 "🧠 Estructura + Movimiento\n"
                 "🚀 Impulso + Pullback\n"
                 "💥 Continuación\n\n"
-                "📡 Proveedor: BiQuote\n"
+                "📡 Proveedor: Twelve Data\n"
                 "⏱ Próximo análisis automático."
             ),
             reply_markup=teclado()
@@ -132,8 +132,6 @@ async def botones(
             "🔴 BOT APAGADO"
         )
 
-        return
-
 
 # =========================================================
 # INICIO
@@ -156,7 +154,7 @@ async def inicio(application):
             "🚀 XAU SNIPER AI V4.2\n\n"
             "✅ Telegram: OK\n"
             "✅ Motor V4.2: OK\n"
-            "📡 Datos: BiQuote\n"
+            "📡 Datos: Twelve Data\n"
             "📊 Mercado: XAU/USD\n"
             "⏱ Revisión: cada 100 segundos\n\n"
             "🔴 Estado: APAGADO\n\n"
@@ -272,16 +270,9 @@ async def ejecutar_analisis(
 
         # =================================================
         # ESPERANDO
-        #
-        # Ahora SÍ se manda a Telegram.
         # =================================================
 
         if tipo == "ESPERANDO":
-
-            # No repetir el mismo estado cada 100 segundos.
-            #
-            # Solo enviamos la primera vez que aparece
-            # un ID distinto a ultima_senal.
 
             if (
                 identificador
@@ -370,7 +361,7 @@ async def start(
             "🥇 XAU SNIPER AI V4.2\n\n"
             "🟢 BOT ENCENDIDO\n\n"
             "📊 Mercado: XAU/USD\n"
-            "📡 Datos: BiQuote\n"
+            "📡 Datos: Twelve Data\n"
             "⏱ Análisis: cada 100 segundos\n\n"
             "🧠 Estructura + Movimiento\n"
             "🚀 Impulso + Pullback\n"
@@ -394,20 +385,18 @@ async def status(
     context: ContextTypes.DEFAULT_TYPE
 ):
 
-    if bot_encendido:
-
-        estado_actual = "🟢 ENCENDIDO"
-
-    else:
-
-        estado_actual = "🔴 APAGADO"
+    estado_actual = (
+        "🟢 ENCENDIDO"
+        if bot_encendido
+        else "🔴 APAGADO"
+    )
 
     await update.message.reply_text(
         (
             "📊 XAU SNIPER AI V4.2\n\n"
             f"Estado: {estado_actual}\n"
             "📈 Mercado: XAU/USD\n"
-            "📡 Datos: BiQuote\n"
+            "📡 Datos: Twelve Data\n"
             "⏱ Intervalo: 100 segundos\n\n"
             "🧠 Motor:\n"
             "Estructura + Impulso + "
@@ -436,6 +425,13 @@ def main():
             "❌ Falta CHAT_ID en Railway"
         )
 
+    if not os.getenv("API_KEY"):
+
+        raise ValueError(
+            "❌ Falta API_KEY de Twelve Data "
+            "en Railway"
+        )
+
     print(
         "🚀 Iniciando XAU SNIPER AI V4.2..."
     )
@@ -445,7 +441,7 @@ def main():
     )
 
     print(
-        "📡 Proveedor: BiQuote"
+        "📡 Proveedor: Twelve Data"
     )
 
     print(
